@@ -46,5 +46,6 @@ export function mergeStats(a: Partial<Stats>, b: Partial<Stats>): Stats {
     },
     totals: { created: max('created'), correct: max('correct'), listens: max('listens'), perfect: max('perfect') },
     badges: [...new Set([...x.badges, ...y.badges])],
+    petName: newer.petName || x.petName,
   };
 }

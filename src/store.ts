@@ -38,6 +38,7 @@ export function fixStats(s: Partial<Stats>): Stats {
     day: { ...emptyDay(), ...day },
     totals: { created: 0, correct: 0, listens: 0, perfect: 0, ...(s.totals ?? {}) },
     badges: s.badges ?? [],
+    petName: s.petName || '콩이',
   };
 }
 export const saveStats = (s: Stats) => write(K.stats, s);

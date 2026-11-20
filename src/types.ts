@@ -41,6 +41,7 @@ export interface Stats {
   day: DayLog;
   totals: { created: number; correct: number; listens: number; perfect: number };
   badges: string[];
+  petName?: string; // 강아지 이름
 }
 
 export interface Settings {
