@@ -126,25 +126,25 @@ export function rarity(c: Card) {
 
 // ───────────────────────── 일일 퀘스트 ─────────────────────────
 export const QUESTS = [
-  { id: 'fight', icon: '🎾', label: '공 5개 물어오기', goal: 5, xp: 30, value: (s: Stats) => s.day.correct },
-  { id: 'make', icon: '✍️', label: '새 표현 1개 만들기', goal: 1, xp: 20, value: (s: Stats) => s.day.created },
-  { id: 'listen', icon: '🎧', label: '20회 듣기 1번 완주', goal: 1, xp: 15, value: (s: Stats) => s.day.loops },
+  { id: 'fight', icon: 'ball', label: '공 5개 물어오기', goal: 5, xp: 30, value: (s: Stats) => s.day.correct },
+  { id: 'make', icon: 'pen', label: '새 표현 1개 만들기', goal: 1, xp: 20, value: (s: Stats) => s.day.created },
+  { id: 'listen', icon: 'headphones', label: '20회 듣기 1번 완주', goal: 1, xp: 15, value: (s: Stats) => s.day.loops },
 ];
 
 // ───────────────────────── 배지 ─────────────────────────
 export const BADGES = [
-  { id: 'first', icon: '🌱', name: '첫 마디', desc: '첫 표현 저장', test: (s: Stats, cs: Card[]) => cs.length >= 1 },
-  { id: 'cards10', icon: '📒', name: '표현 수집가', desc: '표현 10개', test: (s: Stats, cs: Card[]) => cs.length >= 10 },
-  { id: 'cards50', icon: '📚', name: '나만의 사전', desc: '표현 50개', test: (s: Stats, cs: Card[]) => cs.length >= 50 },
-  { id: 'combo5', icon: '🔥', name: '불붙었다', desc: '5 콤보', test: (s: Stats) => s.bestCombo >= 5 },
-  { id: 'combo10', icon: '☄️', name: '멈출 수 없어', desc: '10 콤보', test: (s: Stats) => s.bestCombo >= 10 },
-  { id: 'streak3', icon: '📅', name: '작심삼일 돌파', desc: '3일 연속', test: (s: Stats) => s.streak >= 3 },
-  { id: 'streak7', icon: '🗓️', name: '한 주 완주', desc: '7일 연속', test: (s: Stats) => s.streak >= 7 },
-  { id: 'streak30', icon: '🦮', name: '한 달 산책', desc: '30일 연속', test: (s: Stats) => s.streak >= 30 },
-  { id: 'perfect', icon: '🎯', name: '무결점', desc: '5문제 이상 전부 정답', test: (s: Stats) => s.totals.perfect >= 1 },
-  { id: 'listen100', icon: '🎧', name: '귀가 트인다', desc: '누적 100회 듣기', test: (s: Stats) => s.totals.listens >= 100 },
-  { id: 'master1', icon: '🏆', name: '첫 전설 카드', desc: '표현 1개 마스터', test: (s: Stats, cs: Card[]) => cs.some((c) => c.stage >= MASTERED_STAGE) },
-  { id: 'lv8', icon: '🐕', name: '다 컸네!', desc: 'Lv.8 달성', test: (s: Stats) => levelOf(s.xp) >= 8 },
+  { id: 'first', icon: 'sparkle', name: '첫 마디', desc: '첫 표현 저장', test: (s: Stats, cs: Card[]) => cs.length >= 1 },
+  { id: 'cards10', icon: 'card', name: '표현 수집가', desc: '표현 10개', test: (s: Stats, cs: Card[]) => cs.length >= 10 },
+  { id: 'cards50', icon: 'book', name: '나만의 사전', desc: '표현 50개', test: (s: Stats, cs: Card[]) => cs.length >= 50 },
+  { id: 'combo5', icon: 'flame', name: '불붙었다', desc: '5 콤보', test: (s: Stats) => s.bestCombo >= 5 },
+  { id: 'combo10', icon: 'flame', name: '멈출 수 없어', desc: '10 콤보', test: (s: Stats) => s.bestCombo >= 10 },
+  { id: 'streak3', icon: 'calendar', name: '작심삼일 돌파', desc: '3일 연속', test: (s: Stats) => s.streak >= 3 },
+  { id: 'streak7', icon: 'calendar', name: '한 주 완주', desc: '7일 연속', test: (s: Stats) => s.streak >= 7 },
+  { id: 'streak30', icon: 'calendar', name: '한 달 산책', desc: '30일 연속', test: (s: Stats) => s.streak >= 30 },
+  { id: 'perfect', icon: 'target', name: '무결점', desc: '5문제 이상 전부 정답', test: (s: Stats) => s.totals.perfect >= 1 },
+  { id: 'listen100', icon: 'headphones', name: '귀가 트인다', desc: '누적 100회 듣기', test: (s: Stats) => s.totals.listens >= 100 },
+  { id: 'master1', icon: 'crown', name: '첫 전설 카드', desc: '표현 1개 마스터', test: (s: Stats, cs: Card[]) => cs.some((c) => c.stage >= MASTERED_STAGE) },
+  { id: 'lv8', icon: 'paw', name: '다 컸네!', desc: 'Lv.8 달성', test: (s: Stats) => levelOf(s.xp) >= 8 },
 ];
 
 // ───────────────────────── 효과음 & 진동 ─────────────────────────

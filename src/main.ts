@@ -3,6 +3,7 @@ import type { Card, Word } from './types';
 import { generateExpression, lookupWord, friendlyError, type Expression } from './api';
 import { inArtifact, sampleCap, downloadsCap, remoteWrite, remoteLoadAll, onSync, hasUnsaved, type SyncState } from './platform';
 import { mergeCards, mergeStats } from './sync';
+import { icon } from './icons';
 import { sticker, stickerRaw, STICKERS, GOLD_LEVEL, newlyUnlocked, type StickerName } from './stickers';
 import { schedule, isDue, newCardSchedule, formatDue, STAGE_LABELS, type Grade } from './srs';
 import { speak, stopSpeaking, listenKorean, stopListening, sttSupported, ttsSupported, unlockSpeech, soundReport } from './speech';
@@ -26,12 +27,12 @@ let loaded = false; // 계정 기록 불러오기 끝났는지
 onSync((st) => { sync = st; const el = document.getElementById('sync'); if (el) el.outerHTML = syncChip(); });
 function syncChip() {
   const m: Record<SyncState, [string, string]> = {
-    local: ['📱', '이 기기에만 저장 · 백업 권장'],
+    local: ['phone', '이 기기에만 저장 · 백업 권장'],
     saving: ['⏳', '계정에 저장 중'],
-    saved: ['☁️', '계정에 저장됨'],
-    retrying: ['⚠️', '저장 재시도 중 · 연결 확인'],
+    saved: ['cloud', '계정에 저장됨'],
+    retrying: ['warn', '저장 재시도 중 · 연결 확인'],
   };
-  return `<button id="sync" class="sync sync-${sync}" data-action="nav" data-view="settings">${m[sync][0]} ${m[sync][1]}</button>`;
+  return `<button id="sync" class="sync sync-${sync}" data-action="nav" data-view="settings">${icon(m[sync][0])}<span>${m[sync][1]}</span></button>`;
 }
 let hasClaude = false; // claude.ai 안: 내 Claude 계정으로 호출(API 키 불필요)
 sampleCap.then((s) => { hasClaude = !!s; render(); });
@@ -132,13 +133,13 @@ function checkProgress() {
       stats.day.claimed = [...stats.day.claimed, q.id];
       stats.xp += q.xp;
       sfx('quest');
-      banner(`${q.icon} 퀘스트 완료! ${q.label}`, `+${q.xp} XP`);
+      banner(`퀘스트 완료! ${q.label}`, `+${q.xp} XP`, q.icon);
     }
   }
   for (const b of BADGES) {
     if (!stats.badges.includes(b.id) && b.test(stats, cards)) {
       stats.badges = [...stats.badges, b.id];
-      banner(`${b.icon} 배지 획득: ${b.name}`, b.desc);
+      banner(`배지 획득: ${b.name}`, b.desc, b.icon);
     }
   }
 }
@@ -152,10 +153,10 @@ function toast(msg: string) {
 }
 
 /** 위에서 내려오는 게임 알림 (여러 개면 순서대로) */
-let bannerQueue: [string, string][] = [];
+let bannerQueue: [string, string, string][] = [];
 let bannerBusy = false;
-function banner(title: string, sub: string) {
-  bannerQueue.push([title, sub]);
+function banner(title: string, sub: string, ic = 'sparkle') {
+  bannerQueue.push([title, sub, ic]);
   if (!bannerBusy) nextBanner();
 }
 function nextBanner() {
@@ -164,7 +165,7 @@ function nextBanner() {
   bannerBusy = true;
   const el = document.createElement('div');
   el.className = 'banner';
-  el.innerHTML = `<b>${esc(item[0])}</b><span>${esc(item[1])}</span>`;
+  el.innerHTML = `<span class="bn-ic">${icon(item[2])}</span><span class="bn-txt"><b>${esc(item[0])}</b><span>${esc(item[1])}</span></span>`;
   document.body.appendChild(el);
   setTimeout(() => { el.remove(); nextBanner(); }, 2300);
 }
@@ -192,13 +193,13 @@ function playerHTML(card: Card) {
   return `
   <div class="player">
     <div class="ring" style="--p:${pct}">
-      <button class="play" data-action="play" data-id="${card.id}" aria-label="한 번 듣기">▶</button>
+      <button class="play" data-action="play" data-id="${card.id}" aria-label="한 번 듣기">${icon('play')}</button>
     </div>
     <div class="player-info">
       <div class="count"><b id="listen-count">${card.listens}</b><span>/ ${target}회</span>${card.listens >= target ? '<em class="done-chip">완주</em>' : ''}</div>
       <div class="row tight">
-        <button class="btn sm ${looping ? 'red' : 'go'}" data-action="loop" data-id="${card.id}">${looping ? '■ 정지' : `🔁 ${left}회 연속`}</button>
-        <button class="btn sm plain" data-action="slow" data-id="${card.id}">🐢 천천히</button>
+        <button class="btn sm ${looping ? 'red' : 'pink'}" data-action="loop" data-id="${card.id}">${looping ? `${icon('close')} 정지` : `${icon('repeat')} ${left}회 연속`}</button>
+        <button class="btn sm plain" data-action="slow" data-id="${card.id}">${icon('slow')} 천천히</button>
       </div>
     </div>
   </div>`;
@@ -236,16 +237,17 @@ function homeView() {
   const questGo: Record<string, string> = { fight: due.length ? 'start-review' : '', make: 'go-create', listen: cards.length ? 'go-list' : 'go-create' };
   return `
   <header class="top-bar">
-    <span class="streak">🔥 ${stats.streak}일 연속</span>
+    <span class="streak">${icon('flame')}<b>${stats.streak}</b>일 연속</span>
     ${sync === 'retrying' || (sync === 'local' && cards.length) ? syncChip() : ''}
-    <button class="icon gear" data-action="nav" data-view="settings" aria-label="설정">⚙️</button>
+    <button class="icon gear" data-action="nav" data-view="settings" aria-label="설정">${icon('gear')}</button>
   </header>
 
   <section class="home-hero">
     <button class="hero-stage big pettable" data-action="pet" data-face="${face}" aria-label="${esc(pet())} 쓰다듬기">${sticker(face, lv)}</button>
     <div class="pet-line"><b class="pet-name">${esc(pet())}</b><span class="lv-pill">Lv.${lv}</span><span class="title-chip">${FORMS[f].title}</span></div>
     ${xpBarHTML(stats.xp)}
-    <p class="unlock">${nextSticker ? `Lv.${nextSticker.lv}에 <b>'${nextSticker.label}'</b> 스티커가 열려요` : lv >= GOLD_LEVEL ? '모든 스티커 수집 완료! 👑' : `Lv.${GOLD_LEVEL}에 <b>황금 테두리</b>가 열려요`}</p>
+    ${nextSticker ? `<button class="next-sticker" data-action="go-stickers"><span class="ns-thumb">${stickerRaw(nextSticker.name)}${icon('lock', 'ns-lock')}</span><span class="ns-text"><small>다음 스티커</small><b>Lv.${nextSticker.lv}에 '${nextSticker.label}'</b></span>${icon('next')}</button>`
+      : `<p class="unlock">${lv >= GOLD_LEVEL ? '모든 스티커와 황금 테두리를 모았어요' : `Lv.${GOLD_LEVEL}에 <b>황금 테두리</b>가 열려요`}</p>`}
   </section>
 
   <section class="panel today ${due.length ? 'ready' : ''}">
@@ -253,18 +255,18 @@ function homeView() {
     ${due.length ? `
       <button class="play-cta" data-action="start-review">
         <span class="balls">${due.slice(0, 3).map(() => `<span class="mon-mini">${ballSVG()}</span>`).join('')}</span>
-        <span class="pc-text"><b>🎾 놀아주기</b><small>잊기 전에 떠올려요</small></span>
+        <span class="pc-text"><b>놀아주기</b><small>잊기 전에 다시 떠올려요</small></span>
         <span class="pc-count">${due.length}</span>
       </button>` : `
-      <div class="rest">😴 <span>${next ? `다음 놀이는 <b>${formatDue(next)}</b>에 열려요` : '표현을 만들면 10분 뒤 첫 놀이가 열려요'}</span></div>`}
+      <div class="rest">${stickerRaw('yawn', 'rest-st')}<span>${next ? `다음 놀이는 <b>${formatDue(next)}</b>에 열려요` : '표현을 만들면 10분 뒤 첫 놀이가 열려요'}</span></div>`}
     <div class="quests">${QUESTS.map((q) => {
       const v = Math.min(q.value(stats), q.goal);
       const done = stats.day.claimed.includes(q.id);
       const act = done ? '' : questGo[q.id];
       return `<${act ? 'button' : 'div'} class="quest ${done ? 'done' : ''}" ${act ? `data-action="${act}"` : ''}>
-        <span class="q-icon">${done ? '✅' : q.icon}</span>
+        <span class="q-icon">${icon(done ? 'check' : q.icon)}</span>
         <span class="q-main"><span class="q-label">${q.label}</span><span class="q-bar"><i style="width:${(v / q.goal) * 100}%"></i></span></span>
-        <span class="q-xp">${done ? '완료' : `+${q.xp}`}</span>${act ? '<span class="q-go">›</span>' : ''}
+        <span class="q-xp">${done ? '완료' : `+${q.xp}`}</span>${act ? `<span class="q-go">${icon('next')}</span>` : ''}
       </${act ? 'button' : 'div'}>`;
     }).join('')}</div>
   </section>`;
@@ -284,8 +286,8 @@ function createView() {
     <textarea id="ko" rows="3" placeholder="예) ${EXAMPLES[0]}">${esc(ui.draftKo)}</textarea>
     ${!ui.draftKo && !d ? `<div class="examples">${EXAMPLES.slice(1).map((e) => `<button class="ex" data-action="example" data-text="${esc(e)}">${esc(e)}</button>`).join('')}</div>` : ''}
     <div class="row">
-      ${sttSupported() ? `<button class="btn ${ui.listening ? 'red' : 'plain'}" data-action="mic">${ui.listening ? '■ 그만 듣기' : '🎙️ 말하기'}</button>` : ''}
-      <button class="btn pink grow" data-action="generate" ${ui.busy ? 'disabled' : ''}>${ui.busy ? `<span class="spin"></span> ${esc(pet())}${josa(pet(), '이', '')}가 생각 중…` : '✨ 영어로 만들기'}</button>
+      ${sttSupported() ? `<button class="btn ${ui.listening ? 'red' : 'plain'}" data-action="mic">${ui.listening ? `${icon('close')} 그만` : `${icon('mic')} 말하기`}</button>` : ''}
+      <button class="btn pink grow" data-action="generate" ${ui.busy ? 'disabled' : ''}>${ui.busy ? `<span class="spin"></span> ${esc(pet())}${josa(pet(), '이', '')}가 생각 중…` : `${icon('sparkle')} 영어로 만들기`}</button>
     </div>
     ${!aiReady() ? `<p class="warn">먼저 <a href="#" data-action="nav" data-view="settings">설정</a>에서 API 키를 입력해 주세요.</p>` : ''}
     ${ui.error ? `<p class="warn">${esc(ui.error)}</p>` : ''}
@@ -299,14 +301,14 @@ function draftHTML(d: Expression) {
   return `
   <section class="panel result">
     <div class="en">${sentenceHTML(d.en, 'draft')}</div>
-    <p class="hint">👆 모르는 단어를 누르면 뜻이 나와요</p>
+    <p class="hint">점선 단어를 누르면 뜻이 나와요</p>
     ${playerHTML(temp)}
-    ${d.note_ko ? `<p class="note">💡 ${esc(d.note_ko)}</p>` : ''}
+    ${d.note_ko ? `<p class="note">${esc(d.note_ko)}</p>` : ''}
     ${altsHTML(d.alts)}
     ${wordChipsHTML(temp)}
     <div class="row">
       <button class="btn plain" data-action="discard">다시 만들기</button>
-      <button class="btn go grow" data-action="save">🃏 카드로 획득 <small>+10 XP</small></button>
+      <button class="btn pink grow" data-action="save">카드로 저장 <small>+10 XP</small></button>
     </div>
   </section>`;
 }
@@ -314,7 +316,7 @@ function draftHTML(d: Expression) {
 function altsHTML(alts: string[]) {
   if (!alts.length) return '';
   return `<div class="alts"><div class="label">다른 표현</div>${alts
-    .map((a) => `<div class="alt"><span>${esc(a)}</span><button class="icon" data-action="say" data-text="${esc(a)}" aria-label="듣기">🔊</button></div>`)
+    .map((a) => `<div class="alt"><span>${esc(a)}</span><button class="icon" data-action="say" data-text="${esc(a)}" aria-label="듣기">${icon('volume')}</button></div>`)
     .join('')}</div>`;
 }
 
@@ -324,15 +326,15 @@ function listItem(c: Card) {
   return `<button class="item card-${r.key}" data-action="detail" data-id="${c.id}">
     <span class="gem"></span>
     <div class="item-main"><div class="item-en">${esc(c.en)}</div><div class="item-ko">${esc(c.ko)}</div></div>
-    <div class="item-side">${rarityChip(c)}<div class="due ${isDue(c) ? 'now' : ''}">${isDue(c) ? '⚠ 출현 중' : formatDue(c)}</div></div>
+    <div class="item-side">${rarityChip(c)}<div class="due ${isDue(c) ? 'now' : ''}">${isDue(c) ? '지금 놀이 대기' : formatDue(c)}</div></div>
   </button>`;
 }
 
 function listView() {
   const seg = `<div class="seg" role="tablist">
-      <button class="${ui.dex === 'cards' ? 'on' : ''}" data-action="dex" data-d="cards" role="tab">🃏 카드 ${cards.length}</button>
-      <button class="${ui.dex === 'stickers' ? 'on' : ''}" data-action="dex" data-d="stickers" role="tab">🐶 스티커 ${STICKERS.filter((x) => x.lv <= levelOf(stats.xp)).length}/${STICKERS.length}</button>
-      <button class="${ui.dex === 'badges' ? 'on' : ''}" data-action="dex" data-d="badges" role="tab">🏅 배지 ${stats.badges.length}/${BADGES.length}</button>
+      <button class="${ui.dex === 'cards' ? 'on' : ''}" data-action="dex" data-d="cards" role="tab">${icon('cards')}카드 ${cards.length}</button>
+      <button class="${ui.dex === 'stickers' ? 'on' : ''}" data-action="dex" data-d="stickers" role="tab">${icon('paw')}스티커 ${STICKERS.filter((x) => x.lv <= levelOf(stats.xp)).length}/${STICKERS.length}</button>
+      <button class="${ui.dex === 'badges' ? 'on' : ''}" data-action="dex" data-d="badges" role="tab">${icon('medal')}배지 ${stats.badges.length}/${BADGES.length}</button>
     </div>`;
   if (ui.dex === 'stickers') {
     const lv = levelOf(stats.xp);
@@ -342,7 +344,7 @@ function listView() {
       <p class="hint">레벨이 오르면 ${esc(petGa())} 새 표정을 보여줘요.${lv >= GOLD_LEVEL ? ' 황금 테두리 획득!' : ` Lv.${GOLD_LEVEL}에는 황금 테두리가 생겨요.`}</p>
       <div class="sticker-grid">${STICKERS.map((x) => {
         const open = lv >= x.lv;
-        return `<div class="st-cell ${open ? 'open' : 'locked'}">${stickerRaw(x.name, lv >= GOLD_LEVEL && open ? 'gold' : '')}<b>${open ? x.label : `Lv.${x.lv}에 열려요`}</b><small>${x.when}</small></div>`;
+        return `<div class="st-cell ${open ? 'open' : 'locked'}"><span class="tape"></span><span class="st-img">${stickerRaw(x.name, lv >= GOLD_LEVEL && open ? 'gold' : '')}${open ? '' : icon('lock', 'st-lock')}</span><b>${open ? x.label : `Lv.${x.lv}`}</b><small>${x.when}</small></div>`;
       }).join('')}</div>
     </section>`;
   }
@@ -352,7 +354,7 @@ function listView() {
       <h2 class="screen-title">도감</h2>${seg}
       <div class="badges">${BADGES.map((b) => {
         const on = stats.badges.includes(b.id);
-        return `<div class="badge-i ${on ? 'on' : ''}"><span>${on ? b.icon : '🔒'}</span><b>${b.name}</b><small>${b.desc}</small></div>`;
+        return `<div class="badge-i ${on ? 'on' : ''}"><span class="medal">${icon(on ? b.icon : 'lock')}</span><b>${b.name}</b><small>${b.desc}</small></div>`;
       }).join('')}</div>
     </section>`;
   }
@@ -372,7 +374,7 @@ function listView() {
     <div class="filters">${filters.map(([k, l]) => `<button class="fchip ${f === k ? 'on' : ''} ${k !== 'all' && k !== 'due' ? `rar-${k}` : ''}" data-action="filter" data-f="${k}">${l} <small>${count(k)}</small></button>`).join('')}</div>
     <p class="hint">놀이에서 공을 물어올 때마다 카드 등급이 올라가요. 전설은 완전히 내 것이 된 표현이에요.</p>
   </section>
-  <section class="list">${list.length ? list.map(listItem).join('') : `<div class="panel empty">${cards.length ? '조건에 맞는 카드가 없어요.' : '아직 모은 카드가 없어요. 아래 ✍️ 만들기에서 첫 표현을 만들어 보세요!'}</div>`}</section>`;
+  <section class="list">${list.length ? list.map(listItem).join('') : `<div class="panel empty">${cards.length ? '조건에 맞는 카드가 없어요.' : '아직 모은 카드가 없어요. 아래 만들기에서 첫 표현을 만들어 보세요!'}</div>`}</section>`;
 }
 
 function detailView() {
@@ -381,14 +383,14 @@ function detailView() {
   const r = rarity(c);
   const isNew = ui.newCardId === c.id;
   return `
-  <button class="back" data-action="nav" data-view="list">‹ 도감</button>
+  <button class="back" data-action="nav" data-view="list">${icon('back')}도감</button>
   <section class="panel result tcg card-${r.key} ${isNew ? 'reveal' : ''}">
     <div class="tcg-top">${rarityChip(c)}<span class="stage-chip">기억 단계 ${c.stage}/${STAGE_LABELS.length - 1} · ${STAGE_LABELS[c.stage]}</span></div>
     ${isNew ? `<div class="got-wrap"><div class="peek">${sticker('surprised', levelOf(stats.xp), 'swap')}</div><div class="got">새 카드 획득!</div></div>` : ''}
     <div class="ko">${esc(c.ko)}</div>
     <div class="en">${sentenceHTML(c.en, c.id)}</div>
     ${playerHTML(c)}
-    ${c.note ? `<p class="note">💡 ${esc(c.note)}</p>` : ''}
+    ${c.note ? `<p class="note">${esc(c.note)}</p>` : ''}
     ${altsHTML(c.alts)}
     ${wordChipsHTML(c)}
     <div class="tcg-stats">
@@ -414,8 +416,8 @@ function soundStatusHTML() {
       ${row('마지막 재생', d.last, d.fail > 0 && d.ok === 0)}
     </div>
     <div class="row tight">
-      <button class="btn sm go" data-action="sound-test">🔊 영어 소리 테스트</button>
-      <button class="btn sm plain" data-action="sfx-test">🔔 효과음 테스트</button>
+      <button class="btn sm go" data-action="sound-test">${icon('volume')} 영어 소리 테스트</button>
+      <button class="btn sm plain" data-action="sfx-test">${icon('bell')} 효과음 테스트</button>
     </div>
   </div>
   ${!ok || d.place === '앱 안 화면' ? soundHelpHTML() : ''}`;
@@ -432,19 +434,19 @@ function soundHelpHTML() {
 
 function settingsView() {
   return `
-  <button class="back" data-action="nav" data-view="home">‹ 홈</button>
+  <button class="back" data-action="nav" data-view="home">${icon('back')}홈</button>
   <section class="panel">
     <h2 class="screen-title">설정</h2>
     <p class="hint">바꾸면 바로 저장돼요.</p>
-    <h3 class="sub-h">🔊 소리</h3>
+    <h3 class="sub-h">${icon('volume')}소리</h3>
     ${soundStatusHTML()}
     <label for="rate">읽기 속도 <b id="rate-v">${settings.rate.toFixed(2)}x</b></label><input id="rate" type="range" min="0.5" max="1.2" step="0.05" value="${settings.rate}">
     <label for="target">표현당 목표 듣기 횟수</label><input id="target" type="number" min="1" max="100" value="${settings.listenTarget}">
     <label class="switch"><input id="sound" type="checkbox" ${settings.sound ? 'checked' : ''}> 효과음·진동</label>
-    <h3 class="sub-h">🐶 강아지 이름</h3>
+    <h3 class="sub-h">${icon('paw')}강아지 이름</h3>
     <input id="petname" type="text" maxlength="10" value="${esc(pet())}" aria-label="강아지 이름">
     ${hasClaude ? '' : `
-    <h3 class="sub-h">🤖 Claude API 키</h3>
+    <h3 class="sub-h">${icon('sparkle')}Claude API 키</h3>
     <input id="apikey" type="password" autocomplete="off" placeholder="sk-ant-..." value="${esc(settings.apiKey)}" aria-label="Anthropic API 키">
     <p class="hint">키는 이 휴대폰 안에만 저장되고 Anthropic 서버로만 전송돼요.</p>`}
   </section>
@@ -454,7 +456,7 @@ function settingsView() {
     <p class="hint">${sync === 'local'
       ? '지금은 이 기기 브라우저에만 저장돼요. 브라우저 데이터를 지우면 사라지니 가끔 내보내기로 백업하세요.'
       : 'claude.ai 계정에 저장돼서 다시 열어도, 다른 기기에서 열어도 기록이 이어져요.'}</p>
-    <div class="row"><button class="btn plain grow" data-action="export">⬇️ 내보내기</button><label class="btn plain grow" for="import">⬆️ 가져오기</label><input id="import" type="file" accept="application/json" hidden></div>
+    <div class="row"><button class="btn plain grow" data-action="export">${icon('download')} 내보내기</button><label class="btn plain grow" for="import">${icon('upload')} 가져오기</label><input id="import" type="file" accept="application/json" hidden></div>
   </section>
   <details class="panel rules">
     <summary>놀이 규칙 (망각곡선)</summary>
@@ -523,7 +525,7 @@ function arenaHTML(s: Session) {
   return `
   <div class="arena">
     <div class="fighter hero-side ${s.arena === 'hit' ? 'jump' : s.arena === 'laugh' ? 'shake' : ''}">${sticker(s.arena === 'hit' ? 'happy' : s.arena === 'laugh' ? 'angry' : 'excited', levelOf(stats.xp), s.arena !== 'idle' ? 'swap' : '')}</div>
-    <div class="vs">${s.combo >= 2 ? `<div class="combo">🔥 ${s.combo} COMBO</div>` : '<span class="dots">· · ·</span>'}</div>
+    <div class="vs">${s.combo >= 2 ? `<div class="combo">${icon('flame')}${s.combo} COMBO</div>` : '<span class="dots">· · ·</span>'}</div>
     <div class="fighter mon-side ${s.arena === 'hit' ? 'fetch' : s.arena === 'laugh' ? 'rollaway' : 'float'}">${ballSVG()}</div>
   </div>
   <div class="arena-meta"><span>남은 공 <b>${left}</b></span><span>획득 <b>${s.xp}</b> XP</span></div>`;
@@ -537,14 +539,14 @@ function reviewView() {
   const total = s.queue.length;
   const head = `
   <div class="game-head">
-    <button class="icon close" data-action="quit" aria-label="그만하기">✕</button>
+    <button class="icon close" data-action="quit" aria-label="그만하기">${icon('close')}</button>
     <div class="progress"><i style="width:${(s.idx / total) * 100}%"></i></div>
   </div>
   ${arenaHTML(s)}`;
   let body = '';
   if (s.mode === 'recall') {
     body = `
-    <div class="q-label">💬 이 말을 영어로 소리 내어 말해 보세요</div>
+    <div class="q-label">${icon('mic')}이 말을 영어로 소리 내어 말해 보세요</div>
     <div class="q-ko">${esc(c.ko)}</div>
     ${s.revealed ? `
       <div class="answer"><div class="en">${sentenceHTML(c.en, c.id)}</div>${wordChipsHTML(c)}</div>
@@ -556,24 +558,24 @@ function reviewView() {
   } else if (s.mode === 'scramble') {
     const built = s.picked.map((i) => s.tokens[i]).join(' ');
     body = `
-    <div class="q-label">🧱 단어 블록을 순서대로 쌓아 문장을 완성하세요</div>
+    <div class="q-label">${icon('cards')}단어를 순서대로 눌러 문장을 완성하세요</div>
     <div class="q-ko">${esc(c.ko)}</div>
     <div class="built ${s.feedback}">${esc(built) || '<span class="ph">여기에 문장이 쌓여요</span>'}</div>
     ${s.feedback === 'ng' ? `<div class="answer"><div class="label">정답</div><div class="en">${sentenceHTML(c.en, c.id)}</div></div>` : ''}
-    ${s.feedback ? `<button class="btn go xl" data-action="next">다음 ▶</button>` : `
+    ${s.feedback ? `<button class="btn go xl" data-action="next">다음 ${icon('next')}</button>` : `
     <div class="pool">${s.tokens.map((t, i) => `<button class="tile" data-action="pick" data-i="${i}" ${s.picked.includes(i) ? 'disabled' : ''}>${esc(t)}</button>`).join('')}</div>
-    <div class="row"><button class="btn plain" data-action="undo">↶ 되돌리기</button><button class="btn go grow" data-action="check" ${s.picked.length !== s.tokens.length ? 'disabled' : ''}>던지기!</button></div>`}`;
+    <div class="row"><button class="btn plain" data-action="undo">${icon('back')} 되돌리기</button><button class="btn go grow" data-action="check" ${s.picked.length !== s.tokens.length ? 'disabled' : ''}>던지기!</button></div>`}`;
   } else {
     body = `
-    <div class="q-label">🎧 듣고 알맞은 뜻을 고르세요</div>
-    <button class="big-play" data-action="say" data-text="${esc(c.en)}" aria-label="다시 듣기">🔊</button>
+    <div class="q-label">${icon('headphones')}듣고 알맞은 뜻을 고르세요</div>
+    <button class="big-play" data-action="say" data-text="${esc(c.en)}" aria-label="다시 듣기">${icon('volume')}</button>
     <div class="opts">${s.options
       .map((o, i) => {
         const cls = s.answered === null ? '' : o.ok ? 'ok' : s.answered === i ? 'ng' : 'dim';
         return `<button class="opt ${cls}" data-action="choose" data-i="${i}" ${s.answered !== null ? 'disabled' : ''}>${esc(o.ko)}</button>`;
       })
       .join('')}</div>
-    ${s.answered !== null ? `<div class="answer"><div class="en">${sentenceHTML(c.en, c.id)}</div></div><button class="btn go xl" data-action="next">다음 ▶</button>` : ''}`;
+    ${s.answered !== null ? `<div class="answer"><div class="en">${sentenceHTML(c.en, c.id)}</div></div><button class="btn go xl" data-action="next">다음 ${icon('next')}</button>` : ''}`;
   }
   return `<section class="game">${head}<div class="game-body panel">${body}</div></section>`;
 }
@@ -622,7 +624,7 @@ function grade(g: Grade) {
     if (s.combo > stats.bestCombo) stats.bestCombo = s.combo;
     sfx(s.combo >= 3 ? 'combo' : 'good');
     gainXp(gain, anchor);
-    if (rarity(updated).key !== beforeRar) banner('🃏 카드 등급 상승!', `${rarity(updated).label} 등급이 됐어요`);
+    if (rarity(updated).key !== beforeRar) banner('카드 등급 상승!', `${rarity(updated).label} 등급이 됐어요`, 'card');
   } else {
     s.combo = 0;
     const gain = g === 'hard' ? 5 : 2;
@@ -662,7 +664,7 @@ function showLevelUp(from: number, to: number) {
       <div class="lu-tag">LEVEL UP</div>
       <div class="lu-lv"><span>Lv.${from}</span> → <b>Lv.${to}</b></div>
       <div class="hero-stage big">${fresh.length ? stickerRaw(fresh[0].name, 'swap') : sticker('cool', to, 'swap')}</div>
-      ${fresh.length ? `<div class="lu-evo">새 스티커 획득! <b>'${fresh[0].label}'</b></div>` : to >= GOLD_LEVEL && from < GOLD_LEVEL ? '<div class="lu-evo">황금 테두리 획득! 👑</div>' : ''}
+      ${fresh.length ? `<div class="lu-evo">새 스티커 획득! <b>'${fresh[0].label}'</b></div>` : to >= GOLD_LEVEL && from < GOLD_LEVEL ? '<div class="lu-evo">황금 테두리 획득!</div>' : ''}
       <div class="title-chip big">${f.title}</div>
       <button class="btn go xl" data-action="close-levelup">계속하기</button>
     </div>`;
@@ -754,10 +756,10 @@ async function showWord(wordKey: string, cardId: string) {
 
 function wordHTML(w: Word) {
   return `
-  <div class="sheet-word">${esc(w.word)} <button class="icon" data-action="say" data-text="${esc(w.lemma || w.word)}" aria-label="듣기">🔊</button></div>
+  <div class="sheet-word">${esc(w.word)} <button class="icon" data-action="say" data-text="${esc(w.lemma || w.word)}" aria-label="듣기">${icon('volume')}</button></div>
   <div class="hint">${esc(w.ipa)} · ${esc(w.pos)}${w.lemma && norm(w.lemma) !== norm(w.word) ? ` · 기본형 <b>${esc(w.lemma)}</b>` : ''}</div>
   <div class="sheet-mean">${esc(w.meaning_ko)}</div>
-  ${w.example_en ? `<div class="sheet-ex"><span>${esc(w.example_en)}</span><button class="icon" data-action="say" data-text="${esc(w.example_en)}" aria-label="듣기">🔊</button></div>` : ''}`;
+  ${w.example_en ? `<div class="sheet-ex"><span>${esc(w.example_en)}</span><button class="icon" data-action="say" data-text="${esc(w.example_en)}" aria-label="듣기">${icon('volume')}</button></div>` : ''}`;
 }
 
 function openSheet(html: string) {
@@ -787,11 +789,11 @@ function render() {
   };
   const due = dueCards().length;
   const active: Partial<Record<View, View>> = { detail: 'list', settings: 'home' };
-  const tab = (v: View, icon: string, label: string, badge = 0, cls = '') =>
-    `<button class="tab ${cls} ${(active[ui.view] ?? ui.view) === v ? 'on' : ''}" data-action="nav" data-view="${v}"><span class="t-icon">${icon}</span><span>${label}</span>${badge ? `<em>${badge}</em>` : ''}</button>`;
+  const tab = (v: View, ic: string, label: string, badge = 0, cls = '') =>
+    `<button class="tab ${cls} ${(active[ui.view] ?? ui.view) === v ? 'on' : ''}" data-action="nav" data-view="${v}"><span class="t-icon">${icon(ic)}</span><span>${label}</span>${badge ? `<em>${badge}</em>` : ''}</button>`;
   app.innerHTML = `
     <main class="${ui.view}">${views[ui.view]()}</main>
-    ${ui.view === 'review' ? '' : `<nav class="tabs"><div class="tabs-inner">${tab('home', '🏠', '홈', ui.view === 'home' ? 0 : due)}${tab('create', '✍️', '만들기', 0, 'center')}${tab('list', '🃏', '도감')}</div></nav>`}`;
+    ${ui.view === 'review' ? '' : `<nav class="tabs"><div class="tabs-inner">${tab('home', 'home', '홈', ui.view === 'home' ? 0 : due)}${tab('create', 'pen', '만들기', 0, 'center')}${tab('list', 'cards', '도감')}</div></nav>`}`;
   // 놀이 중에는 문제 사이에 레벨업을 띄우지 않고 결과 화면에서 보여줌
   if (ui.view !== 'review' || !session || session.idx >= session.queue.length) flushLevelUp();
 }
@@ -927,7 +929,7 @@ document.addEventListener('click', async (e) => {
       return closeSheet();
     case 'pet': {
       sfx('bark');
-      floatXp('❤️', el);
+      floatXp('♥', el);
       const back = el.dataset.face as StickerName;
       el.innerHTML = sticker('love', levelOf(stats.xp), 'swap petted');
       clearTimeout(petTimer);
@@ -944,12 +946,14 @@ document.addEventListener('click', async (e) => {
       sfx('tap');
       ui.dex = el.dataset.d as 'cards' | 'stickers' | 'badges';
       return render();
+    case 'go-stickers':
+      return go('list', { dex: 'stickers' });
     case 'go-create':
       return go('create');
     case 'go-list':
       return go('list', { filter: 'all', dex: 'cards' });
     case 'sound-test':
-      el.textContent = '🔊 재생 중…';
+      el.textContent = '재생 중…';
       speak('Hello! Let\'s learn English together.', settings.rate).then(() => { if (ui.view === 'settings') render(); });
       setTimeout(() => { if (ui.view === 'settings') render(); }, 3300);
       return;
@@ -1038,7 +1042,7 @@ let soundHelpShown = false;
 window.addEventListener('speech-unavailable', () => {
   if (soundHelpShown) return;
   soundHelpShown = true;
-  openSheet(`<div class="sheet-word">🔇 영어 음성이 안 나와요</div><p class="hint">이 화면에서는 휴대폰이 영어 읽기를 막고 있어요. 아래 방법으로 해결할 수 있어요.</p>${soundHelpHTML()}<button class="btn go xl" data-action="close-sheet">알겠어요</button>`);
+  openSheet(`<div class="sheet-word">영어 음성이 안 나와요</div><p class="hint">이 화면에서는 휴대폰이 영어 읽기를 막고 있어요. 아래 방법으로 해결할 수 있어요.</p>${soundHelpHTML()}<button class="btn go xl" data-action="close-sheet">알겠어요</button>`);
 });
 
 // 놀이 시간이 되면 홈 갱신
