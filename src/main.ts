@@ -1,6 +1,6 @@
 import './style.css';
 import type { Card, Word } from './types';
-import { generateExpression, lookupWord, friendlyError, type Expression } from './api';
+import { generateExpression, lookupWord, friendlyError, testGeminiKey, type Expression } from './api';
 import { inArtifact, ttsCap, sampleCap, downloadsCap, remoteWrite, remoteLoadAll, onSync, hasUnsaved, type SyncState } from './platform';
 import { mergeCards, mergeStats } from './sync';
 import { icon } from './icons';
@@ -56,6 +56,7 @@ const ui = {
   newCardId: '', // 방금 획득한 카드(등장 연출)
   filter: 'all',
   dex: 'cards' as 'cards' | 'stickers' | 'badges',
+  keyStatus: '',
 };
 
 interface Session {
@@ -264,6 +265,7 @@ function homeView() {
     <button class="icon gear" data-action="nav" data-view="settings" aria-label="설정">${icon('gear')}</button>
   </header>
 
+  ${!aiReady() ? `<button class="key-nudge" data-action="nav" data-view="settings">${icon('sparkle')}<span><b>먼저 Gemini 키를 넣어 주세요</b><small>무료 · 설정 맨 위에서 1분이면 돼요</small></span>${icon('next')}</button>` : ''}
   <section class="home-hero">
     <button class="hero-stage big pettable" data-action="pet" data-face="${face}" aria-label="${esc(pet())} 쓰다듬기">${sticker(face, lv)}</button>
     <div class="pet-line"><b class="pet-name">${esc(pet())}</b><span class="lv-pill">Lv.${lv}</span><span class="title-chip">${FORMS[f].title}</span></div>
@@ -478,6 +480,12 @@ function settingsView() {
   <section class="panel">
     <h2 class="screen-title">설정</h2>
     <p class="hint">바꾸면 바로 저장돼요.</p>
+    ${hasClaude ? '' : `    <h3 class="sub-h">${icon('sparkle')}Gemini API 키 (무료)</h3>
+    <input id="apikey" type="password" autocomplete="off" placeholder="AIza..." value="${esc(settings.apiKey)}" aria-label="Gemini API 키">
+    <button class="btn pink xl" data-action="key-save">저장하고 연결 확인</button>
+    <p class="key-status ${ui.keyStatus.startsWith('연결 성공') ? 'ok' : ui.keyStatus ? 'bad' : ''}" id="key-status">${esc(ui.keyStatus || (settings.apiKey ? '저장된 키가 있어요' : ''))}</p>
+    <p class="hint"><a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>에서 무료로 발급받아 붙여 넣으세요. 키는 이 휴대폰 안에만 저장되고 구글로만 전송돼요. 회사 기밀이 담긴 문장은 넣지 않는 걸 권해요.</p>
+`}
     <h3 class="sub-h">${icon('volume')}소리</h3>
     ${inArtifact ? `<div class="seg voice-seg" role="radiogroup" aria-label="영어 읽기 음성">
       ${([['auto', '자동'], ['claude', 'Claude 음성'], ['device', '휴대폰 음성']] as const).map(([k, l]) =>
@@ -490,11 +498,7 @@ function settingsView() {
     <label class="switch"><input id="sound" type="checkbox" ${settings.sound ? 'checked' : ''}> 진동 (안드로이드)</label>
     <h3 class="sub-h">${icon('paw')}강아지 이름</h3>
     <input id="petname" type="text" maxlength="10" value="${esc(pet())}" aria-label="강아지 이름">
-    ${hasClaude ? '' : `
-    <h3 class="sub-h">${icon('sparkle')}Gemini API 키 (무료)</h3>
-    <input id="apikey" type="password" autocomplete="off" placeholder="AIza..." value="${esc(settings.apiKey)}" aria-label="Gemini API 키">
-    <p class="hint"><a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>에서 무료로 발급받아 붙여 넣으세요. 키는 이 휴대폰 안에만 저장되고 구글로만 전송돼요. 회사 기밀이 담긴 문장은 넣지 않는 걸 권해요.</p>
-    ${stickerSettingsHTML()}`}
+    ${hasClaude ? '' : stickerSettingsHTML()}
   </section>
   <section class="panel">
     <h3 class="sec">학습 기록 ${syncChip()}</h3>
@@ -1062,6 +1066,18 @@ document.addEventListener('click', async (e) => {
         if (!stats.day.claimed.includes('listen')) { stats.day.loops++; gainXp(5); render(); }
       }, 300);
       return;
+    }
+    case 'key-save': {
+      saveSettingsFromForm();
+      if (!settings.apiKey) { ui.keyStatus = '키를 먼저 붙여 넣어 주세요'; return render(); }
+      el.setAttribute('disabled', '');
+      el.textContent = '확인 중…';
+      try {
+        ui.keyStatus = await testGeminiKey(settings.apiKey);
+      } catch (err) {
+        ui.keyStatus = friendlyError(err);
+      }
+      return render();
     }
     case 'st-clear':
       await clearLocalSticker(el.dataset.name!);

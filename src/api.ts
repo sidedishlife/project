@@ -146,6 +146,12 @@ export function lookupWord(key: string, word: string, sentence: string): Promise
   );
 }
 
+/** 키 확인: 아주 짧은 요청을 보내 연결되는지 봄 */
+export async function testGeminiKey(key: string): Promise<string> {
+  const r = await askGemini<{ ok: string }>(key, 'Reply with JSON only.', 'Return {"ok":"yes"}', { type: 'object', properties: { ok: { type: 'string' } }, required: ['ok'] }, 256);
+  return r.ok ? `연결 성공 (${workingModel})` : '연결은 됐지만 답이 이상해요';
+}
+
 export function friendlyError(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }

@@ -327,6 +327,15 @@ button.quest:active { background: var(--paper-2); }
 .rules summary::after { content: "+"; color: var(--muted); }
 .rules[open] summary::after { content: "–"; }
 
+.key-nudge { width: 100%; border: 0; font: inherit; cursor: pointer; text-align: left; display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; color: var(--text); background: var(--paper); box-shadow: var(--shadow); border-radius: 20px; padding: 12px 14px; }
+.key-nudge > .ic:first-child { color: var(--pink-d); }
+.key-nudge > .ic:last-child { color: var(--muted); width: 16px; height: 16px; }
+.key-nudge span { display: grid; line-height: 1.3; } .key-nudge b { font-size: 15px; } .key-nudge small { font-size: 12px; color: var(--muted); font-weight: 600; }
+.key-status { margin: 8px 0 0; font-size: 14px; font-weight: 700; color: var(--muted); min-height: 1em; }
+.key-status.ok { color: var(--mint-d); }
+.key-status.ok::before { content: "✓ "; }
+.key-status.bad { color: var(--coral-d); }
+
 /* 스티커 넣기 칸 */
 .st-slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 10px; }
 .st-slot { display: grid; justify-items: center; gap: 2px; text-align: center; min-width: 0; }
