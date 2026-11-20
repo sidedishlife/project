@@ -48,6 +48,7 @@ const ui = {
   confirmDelete: '',
   newCardId: '', // 방금 획득한 카드(등장 연출)
   filter: 'all',
+  dex: 'cards' as 'cards' | 'badges',
 };
 
 interface Session {
@@ -230,61 +231,44 @@ function homeView() {
   const f = formIndex(lv);
   const nextForm = FORMS[f + 1];
   const next = cards.filter((c) => !isDue(c)).sort((a, b) => a.due - b.due)[0];
-  const rarCount = (k: string) => cards.filter((c) => rarity(c).key === k).length;
-  const mood = due.length ? 'happy' : 'idle';
   const say = !cards.length ? '안녕! 나랑 영어 놀이하자' : due.length ? '놀자! 놀자!' : '쿨쿨…';
+  // 퀘스트 = 오늘 할 일. 각 줄을 누르면 바로 그 일을 하러 감
+  const questGo: Record<string, string> = { fight: due.length ? 'start-review' : '', make: 'go-create', listen: cards.length ? 'go-list' : 'go-create' };
   return `
+  <header class="top-bar">
+    <span class="streak">🔥 ${stats.streak}일 연속</span>
+    ${sync === 'retrying' || (sync === 'local' && cards.length) ? syncChip() : ''}
+    <button class="icon gear" data-action="nav" data-view="settings" aria-label="설정">⚙️</button>
+  </header>
+
   <section class="home-hero">
     <div class="hero-wrap">
       ${bubble(say, due.length ? 'bounce' : '')}
-      <button class="hero-stage big pettable" data-action="pet" aria-label="${esc(pet())} 쓰다듬기">${heroSVG(lv, mood)}</button>
+      <button class="hero-stage big pettable" data-action="pet" aria-label="${esc(pet())} 쓰다듬기">${heroSVG(lv, due.length ? 'happy' : 'idle')}</button>
     </div>
     <div class="pet-line"><b class="pet-name">${esc(pet())}</b><span class="lv-pill">Lv.${lv}</span><span class="title-chip">${FORMS[f].title}</span></div>
     ${xpBarHTML(stats.xp)}
-    <div class="chips-row">
-      <span class="pill">🔥 <b>${stats.streak}</b>일 연속</span>
-      <span class="pill">🃏 <b>${cards.length}</b>장</span>
-      ${syncChip()}
-    </div>
-    ${nextForm ? `<p class="unlock">Lv.${nextForm.lv} 달성 시 <b>${nextForm.item}</b> 선물 · ${nextForm.title}</p>` : '<p class="unlock">다 자랐어요! 👑</p>'}
+    <p class="unlock">${nextForm ? `Lv.${nextForm.lv}에 <b>${nextForm.item}</b> 선물 · ${nextForm.title}` : '다 자랐어요! 👑'}</p>
   </section>
 
-  <section class="panel play-call ${due.length ? 'ready' : ''}">
+  <section class="panel today ${due.length ? 'ready' : ''}">
+    <h3 class="sec">오늘 할 일 <span class="reset">자정에 초기화</span></h3>
     ${due.length ? `
-      <div class="pc-top"><div><div class="pc-title">놀이 시간!</div><p class="sub">공 하나가 표현 하나예요. 지금 놀아주면 잊어버리기 전에 다시 떠올릴 수 있어요.</p></div><div class="pc-count"><b>${due.length}</b><span>개</span></div></div>
-      <div class="mon-row">${due.slice(0, 7).map(() => `<span class="mon-mini">${ballSVG()}</span>`).join('')}${due.length > 7 ? `<span class="more">+${due.length - 7}</span>` : ''}</div>
-      <button class="btn go xl" data-action="start-review">🎾 ${esc(pet())}${josa(pet(), '이', '')}랑 놀아주기</button>` : `
-      <div class="pc-top"><div><div class="pc-title calm">낮잠 시간 😴</div><p class="sub">${next ? `다음 놀이는 <b>${formatDue(next)}</b>에 열려요. 그동안 새 표현을 만들어 볼까요?` : '첫 표현을 만들면 10분 뒤 첫 놀이 시간이 와요.'}</p></div></div>
-      <button class="btn pink xl" data-action="nav" data-view="create">✍️ 새 표현 만들기</button>`}
-  </section>
-
-  <section class="panel">
-    <h3 class="sec">오늘의 퀘스트 <span class="reset">자정에 초기화</span></h3>
+      <button class="play-cta" data-action="start-review">
+        <span class="balls">${due.slice(0, 3).map(() => `<span class="mon-mini">${ballSVG()}</span>`).join('')}</span>
+        <span class="pc-text"><b>🎾 놀아주기</b><small>잊기 전에 떠올려요</small></span>
+        <span class="pc-count">${due.length}</span>
+      </button>` : `
+      <div class="rest">😴 <span>${next ? `다음 놀이는 <b>${formatDue(next)}</b>에 열려요` : '표현을 만들면 10분 뒤 첫 놀이가 열려요'}</span></div>`}
     <div class="quests">${QUESTS.map((q) => {
       const v = Math.min(q.value(stats), q.goal);
       const done = stats.day.claimed.includes(q.id);
-      return `<div class="quest ${done ? 'done' : ''}">
+      const act = done ? '' : questGo[q.id];
+      return `<${act ? 'button' : 'div'} class="quest ${done ? 'done' : ''}" ${act ? `data-action="${act}"` : ''}>
         <span class="q-icon">${done ? '✅' : q.icon}</span>
-        <div class="q-main"><div class="q-label">${q.label}</div><div class="q-bar"><i style="width:${(v / q.goal) * 100}%"></i></div></div>
-        <span class="q-xp">${done ? '완료' : `+${q.xp}`}</span>
-      </div>`;
-    }).join('')}</div>
-  </section>
-
-  <section class="panel">
-    <h3 class="sec">표현 도감 <button class="link" data-action="nav" data-view="list">전체 보기 ›</button></h3>
-    <div class="rar-grid">
-      ${[['common', '일반'], ['uncommon', '고급'], ['rare', '희귀'], ['epic', '영웅'], ['legend', '전설']]
-        .map(([k, l]) => `<button class="rar-cell rar-${k}" data-action="filter" data-f="${k}"><b>${rarCount(k)}</b><span>${l}</span></button>`).join('')}
-    </div>
-    <p class="hint">놀이에서 공을 물어올 때마다 카드 등급이 올라가요. 전설은 완전히 내 것이 된 표현이에요.</p>
-  </section>
-
-  <section class="panel">
-    <h3 class="sec">배지 <span class="reset">${stats.badges.length} / ${BADGES.length}</span></h3>
-    <div class="badges">${BADGES.map((b) => {
-      const on = stats.badges.includes(b.id);
-      return `<div class="badge-i ${on ? 'on' : ''}"><span>${on ? b.icon : '🔒'}</span><b>${b.name}</b><small>${b.desc}</small></div>`;
+        <span class="q-main"><span class="q-label">${q.label}</span><span class="q-bar"><i style="width:${(v / q.goal) * 100}%"></i></span></span>
+        <span class="q-xp">${done ? '완료' : `+${q.xp}`}</span>${act ? '<span class="q-go">›</span>' : ''}
+      </${act ? 'button' : 'div'}>`;
     }).join('')}</div>
   </section>`;
 }
@@ -348,6 +332,20 @@ function listItem(c: Card) {
 }
 
 function listView() {
+  const seg = `<div class="seg" role="tablist">
+      <button class="${ui.dex === 'cards' ? 'on' : ''}" data-action="dex" data-d="cards" role="tab">🃏 카드 ${cards.length}</button>
+      <button class="${ui.dex === 'badges' ? 'on' : ''}" data-action="dex" data-d="badges" role="tab">🏅 배지 ${stats.badges.length}/${BADGES.length}</button>
+    </div>`;
+  if (ui.dex === 'badges') {
+    return `
+    <section class="panel">
+      <h2 class="screen-title">도감</h2>${seg}
+      <div class="badges">${BADGES.map((b) => {
+        const on = stats.badges.includes(b.id);
+        return `<div class="badge-i ${on ? 'on' : ''}"><span>${on ? b.icon : '🔒'}</span><b>${b.name}</b><small>${b.desc}</small></div>`;
+      }).join('')}</div>
+    </section>`;
+  }
   const q = ui.search.trim().toLowerCase();
   const f = ui.filter;
   const list = cards
@@ -355,14 +353,16 @@ function listView() {
     .filter((c) => f === 'all' || (f === 'due' ? isDue(c) : rarity(c).key === f))
     .slice()
     .reverse();
-  const filters: [string, string][] = [['all', '전체'], ['due', '🎾 놀이 대기'], ['common', '일반'], ['uncommon', '고급'], ['rare', '희귀'], ['epic', '영웅'], ['legend', '전설']];
+  const count = (k: string) => (k === 'all' ? cards.length : k === 'due' ? cards.filter(isDue).length : cards.filter((c) => rarity(c).key === k).length);
+  const filters: [string, string][] = [['all', '전체'], ['due', '놀이 대기'], ['common', '일반'], ['uncommon', '고급'], ['rare', '희귀'], ['epic', '영웅'], ['legend', '전설']];
   return `
   <section class="panel">
-    <h2 class="screen-title">표현 도감 <span class="count-chip">${cards.length}장</span></h2>
+    <h2 class="screen-title">도감</h2>${seg}
     <input id="search" type="search" placeholder="검색 (영어/한국어)" value="${esc(ui.search)}">
-    <div class="filters">${filters.map(([k, l]) => `<button class="fchip ${f === k ? 'on' : ''} ${k !== 'all' && k !== 'due' ? `rar-${k}` : ''}" data-action="filter" data-f="${k}">${l}</button>`).join('')}</div>
+    <div class="filters">${filters.map(([k, l]) => `<button class="fchip ${f === k ? 'on' : ''} ${k !== 'all' && k !== 'due' ? `rar-${k}` : ''}" data-action="filter" data-f="${k}">${l} <small>${count(k)}</small></button>`).join('')}</div>
+    <p class="hint">놀이에서 공을 물어올 때마다 카드 등급이 올라가요. 전설은 완전히 내 것이 된 표현이에요.</p>
   </section>
-  <section class="list">${list.length ? list.map(listItem).join('') : `<div class="panel empty">${cards.length ? '조건에 맞는 카드가 없어요.' : '아직 모은 카드가 없어요. 첫 표현을 만들어 보세요!'}</div>`}</section>`;
+  <section class="list">${list.length ? list.map(listItem).join('') : `<div class="panel empty">${cards.length ? '조건에 맞는 카드가 없어요.' : '아직 모은 카드가 없어요. 아래 ✍️ 만들기에서 첫 표현을 만들어 보세요!'}</div>`}</section>`;
 }
 
 function detailView() {
@@ -371,6 +371,7 @@ function detailView() {
   const r = rarity(c);
   const isNew = ui.newCardId === c.id;
   return `
+  <button class="back" data-action="nav" data-view="list">‹ 도감</button>
   <section class="panel result tcg card-${r.key} ${isNew ? 'reveal' : ''}">
     <div class="tcg-top">${rarityChip(c)}<span class="stage-chip">기억 단계 ${c.stage}/${STAGE_LABELS.length - 1} · ${STAGE_LABELS[c.stage]}</span></div>
     ${isNew ? '<div class="got">NEW CARD!</div>' : ''}
@@ -385,7 +386,7 @@ function detailView() {
       <div><b>${c.reviews}</b><span>놀이</span></div>
       <div><b>${c.lapses}</b><span>놓침</span></div>
     </div>
-    <div class="row"><button class="btn plain" data-action="nav" data-view="list">← 도감</button><button class="btn red" data-action="delete" data-id="${c.id}">${ui.confirmDelete === c.id ? '정말 삭제? 한 번 더' : '삭제'}</button></div>
+    <button class="del ${ui.confirmDelete === c.id ? 'armed' : ''}" data-action="delete" data-id="${c.id}">${ui.confirmDelete === c.id ? '정말 삭제할까요? 한 번 더 누르면 삭제돼요' : '이 카드 삭제'}</button>
   </section>`;
 }
 
@@ -408,36 +409,51 @@ function soundHelpHTML() {
 
 function settingsView() {
   return `
+  <button class="back" data-action="nav" data-view="home">‹ 홈</button>
   <section class="panel">
     <h2 class="screen-title">설정</h2>
+    <p class="hint">바꾸면 바로 저장돼요.</p>
     <h3 class="sub-h">🔊 소리</h3>
     ${soundStatusHTML()}
     <label for="rate">읽기 속도 <b id="rate-v">${settings.rate.toFixed(2)}x</b></label><input id="rate" type="range" min="0.5" max="1.2" step="0.05" value="${settings.rate}">
     <label for="target">표현당 목표 듣기 횟수</label><input id="target" type="number" min="1" max="100" value="${settings.listenTarget}">
     <label class="switch"><input id="sound" type="checkbox" ${settings.sound ? 'checked' : ''}> 효과음·진동</label>
-    <h3 class="sub-h">🐶 내 강아지</h3>
-    <label for="petname">이름</label><input id="petname" type="text" maxlength="10" value="${esc(pet())}">
-    <h3 class="sub-h">🤖 Claude 연결</h3>
-    ${hasClaude ? `<p class="ok-note">claude.ai 계정으로 연결돼 있어 API 키 없이 쓸 수 있어요.</p><input id="apikey" type="hidden" value="${esc(settings.apiKey)}">` : `
-    <label for="apikey">Anthropic API 키</label><input id="apikey" type="password" autocomplete="off" placeholder="sk-ant-..." value="${esc(settings.apiKey)}">
+    <h3 class="sub-h">🐶 강아지 이름</h3>
+    <input id="petname" type="text" maxlength="10" value="${esc(pet())}" aria-label="강아지 이름">
+    ${hasClaude ? '' : `
+    <h3 class="sub-h">🤖 Claude API 키</h3>
+    <input id="apikey" type="password" autocomplete="off" placeholder="sk-ant-..." value="${esc(settings.apiKey)}" aria-label="Anthropic API 키">
     <p class="hint">키는 이 휴대폰 안에만 저장되고 Anthropic 서버로만 전송돼요.</p>`}
-    <button class="btn pink xl" data-action="save-settings">저장</button>
   </section>
   <section class="panel">
-    <h3 class="sec">내 학습 기록</h3>
-    ${syncChip()}
+    <h3 class="sec">학습 기록 ${syncChip()}</h3>
     <div class="rec-grid"><div><b>${cards.length}</b><span>카드</span></div><div><b>${stats.totals.correct}</b><span>누적 정답</span></div><div><b>${stats.totals.listens}</b><span>누적 듣기</span></div></div>
     <p class="hint">${sync === 'local'
       ? '지금은 이 기기 브라우저에만 저장돼요. 브라우저 데이터를 지우면 사라지니 가끔 내보내기로 백업하세요.'
-      : 'claude.ai 계정에 저장돼서 앱을 고치거나 다시 열어도, 다른 기기에서 열어도 기록이 이어져요.'}</p>
-    <div class="row"><button class="btn plain" data-action="export">⬇️ 내보내기</button><label class="btn plain" for="import">⬆️ 가져오기</label><input id="import" type="file" accept="application/json" hidden></div>
+      : 'claude.ai 계정에 저장돼서 다시 열어도, 다른 기기에서 열어도 기록이 이어져요.'}</p>
+    <div class="row"><button class="btn plain grow" data-action="export">⬇️ 내보내기</button><label class="btn plain grow" for="import">⬆️ 가져오기</label><input id="import" type="file" accept="application/json" hidden></div>
   </section>
-  <section class="panel">
-    <h3 class="sec">놀이 규칙</h3>
-    <p class="hint">사람은 배운 지 하루만 지나도 절반 넘게 잊어요(에빙하우스 망각곡선). 잊기 직전에 떠올리면 기억이 훨씬 오래가요.
-    그래서 표현이 잊혀질 때쯤 <b>공</b>이 되어 ${esc(petGa())} 놀자고 해요. 떠올려 맞히면 공을 물어오고, 다음 놀이는 <b>10분 → 1일 → 3일 → 1주 → 2주 → 1달 → 2달</b> 뒤로 늦춰져요. 놓치면 10분 뒤 다시 던져줘요.
+  <details class="panel rules">
+    <summary>놀이 규칙 (망각곡선)</summary>
+    <p class="hint">사람은 배운 지 하루만 지나도 절반 넘게 잊어요. 잊기 직전에 떠올리면 기억이 훨씬 오래가요.
+    그래서 표현이 잊혀질 때쯤 <b>공</b>이 되어 ${esc(petGa())} 놀자고 해요. 떠올려 맞히면 다음 놀이가 <b>10분 → 1일 → 3일 → 1주 → 2주 → 1달 → 2달</b> 뒤로 늦춰지고, 놓치면 10분 뒤 다시 나와요.
     XP는 듣기보다 <b>직접 떠올려 맞혔을 때</b> 가장 많이 받아요.</p>
-  </section>`;
+  </details>`;
+}
+
+/** 설정 화면 입력값을 바로 저장 */
+function saveSettingsFromForm() {
+  const val = (id: string) => (document.getElementById(id) as HTMLInputElement | null);
+  settings = {
+    apiKey: val('apikey')?.value.trim() ?? settings.apiKey,
+    rate: Number(val('rate')?.value ?? settings.rate),
+    listenTarget: Math.max(1, Math.min(100, Number(val('target')?.value) || 20)),
+    sound: val('sound')?.checked ?? settings.sound,
+  };
+  setSound(settings.sound);
+  saveSettings(settings);
+  const nm = val('petname')?.value.trim();
+  if (nm && nm !== pet()) { stats = { ...stats, petName: nm.slice(0, 10) }; putStats(); }
 }
 
 // ───────────────────────── 놀이(복습) ─────────────────────────
@@ -748,11 +764,12 @@ function render() {
     home: homeView, create: createView, review: reviewView, list: listView, settings: settingsView, detail: detailView,
   };
   const due = dueCards().length;
-  const tab = (v: View, icon: string, label: string) =>
-    `<button class="tab ${ui.view === v || (v === 'list' && ui.view === 'detail') ? 'on' : ''}" data-action="${v === 'review' ? 'start-review' : 'nav'}" data-view="${v}"><span class="t-icon">${icon}</span><span>${label}</span>${v === 'review' && due ? `<em>${due}</em>` : ''}</button>`;
+  const active: Partial<Record<View, View>> = { detail: 'list', settings: 'home' };
+  const tab = (v: View, icon: string, label: string, badge = 0, cls = '') =>
+    `<button class="tab ${cls} ${(active[ui.view] ?? ui.view) === v ? 'on' : ''}" data-action="nav" data-view="${v}"><span class="t-icon">${icon}</span><span>${label}</span>${badge ? `<em>${badge}</em>` : ''}</button>`;
   app.innerHTML = `
     <main class="${ui.view}">${views[ui.view]()}</main>
-    ${ui.view === 'review' ? '' : `<nav class="tabs"><div class="tabs-inner">${tab('home', '🏠', '홈')}${tab('create', '✍️', '만들기')}${tab('review', '🎾', '놀이')}${tab('list', '🃏', '도감')}${tab('settings', '⚙️', '설정')}</div></nav>`}`;
+    ${ui.view === 'review' ? '' : `<nav class="tabs"><div class="tabs-inner">${tab('home', '🏠', '홈', ui.view === 'home' ? 0 : due)}${tab('create', '✍️', '만들기', 0, 'center')}${tab('list', '🃏', '도감')}</div></nav>`}`;
   // 놀이 중에는 문제 사이에 레벨업을 띄우지 않고 결과 화면에서 보여줌
   if (ui.view !== 'review' || !session || session.idx >= session.queue.length) flushLevelUp();
 }
@@ -770,10 +787,12 @@ app.addEventListener('input', (e) => {
     s.setSelectionRange(pos, pos);
   }
   if (t.id === 'rate') document.getElementById('rate-v')!.textContent = `${Number(t.value).toFixed(2)}x`;
+  if (['rate', 'target', 'sound', 'petname', 'apikey'].includes(t.id)) saveSettingsFromForm();
 });
 
 app.addEventListener('change', async (e) => {
   const t = e.target as HTMLInputElement;
+  if (t.id === 'sound') saveSettingsFromForm();
   if (t.id === 'import' && t.files?.[0]) {
     try {
       importBackup(await t.files[0].text());
@@ -893,14 +912,20 @@ document.addEventListener('click', async (e) => {
       floatXp('❤️', el);
       return;
     }
-    case 'rename':
-      return go('settings');
     case 'example':
       ui.draftKo = el.dataset.text!;
       return render();
     case 'filter':
       sfx('tap');
-      return go('list', { filter: el.dataset.f! });
+      return go('list', { filter: el.dataset.f!, dex: 'cards' });
+    case 'dex':
+      sfx('tap');
+      ui.dex = el.dataset.d as 'cards' | 'badges';
+      return render();
+    case 'go-create':
+      return go('create');
+    case 'go-list':
+      return go('list', { filter: 'all', dex: 'cards' });
     case 'sound-test':
       sfx('good');
       speak('Hello! Let\'s play and learn English together.', settings.rate).then(() => { if (ui.view === 'settings') render(); });
@@ -916,20 +941,6 @@ document.addEventListener('click', async (e) => {
       addTombstone(id);
       remoteWrite(id, null);
       return go('list', { confirmDelete: '' });
-    }
-    case 'save-settings': {
-      settings = {
-        apiKey: (document.getElementById('apikey') as HTMLInputElement).value.trim(),
-        rate: Number((document.getElementById('rate') as HTMLInputElement).value),
-        listenTarget: Math.max(1, Math.min(100, Number((document.getElementById('target') as HTMLInputElement).value) || 20)),
-        sound: (document.getElementById('sound') as HTMLInputElement).checked,
-      };
-      setSound(settings.sound);
-      saveSettings(settings);
-      const nm = (document.getElementById('petname') as HTMLInputElement).value.trim();
-      if (nm && nm !== pet()) { stats = { ...stats, petName: nm.slice(0, 10) }; putStats(); }
-      sfx('tap');
-      return toast('저장했어요');
     }
     case 'export': {
       const filename = `english-backup-${new Date().toISOString().slice(0, 10)}.json`;
