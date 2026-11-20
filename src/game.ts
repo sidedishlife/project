@@ -167,7 +167,50 @@ function tone(freq: number, start: number, dur: number, type: OscillatorType = '
 }
 
 /** 첫 터치 때 호출: 모바일은 탭 안에서 오디오를 깨워야 소리가 남 */
+// ── 아이폰 무음 모드 우회
+// 아이폰은 무음 모드면 웹페이지 효과음과 음성을 꺼버리지만, '미디어 재생'(동영상 소리) 중에는 소리를 냄.
+// 그래서 첫 터치 때 들리지 않는 아주 짧은 오디오를 반복 재생해 두어 이 페이지를 미디어 재생 상태로 만든다.
+let mediaKeepAlive: HTMLAudioElement | null = null;
+export let mediaModeState = '아직 안 켜짐';
+
+function silentWavUrl() {
+  const rate = 8000, n = rate / 2; // 0.5초 무음
+  const buf = new ArrayBuffer(44 + n);
+  const v = new DataView(buf);
+  const str = (o: number, t: string) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+  str(0, 'RIFF'); v.setUint32(4, 36 + n, true); str(8, 'WAVE'); str(12, 'fmt ');
+  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, rate, true); v.setUint32(28, rate, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+  str(36, 'data'); v.setUint32(40, n, true);
+  for (let i = 0; i < n; i++) v.setUint8(44 + i, 128); // 8비트 무음
+  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
+}
+
+function startMediaMode() {
+  try {
+    if (!mediaKeepAlive) {
+      mediaKeepAlive = document.createElement('audio');
+      mediaKeepAlive.src = silentWavUrl();
+      mediaKeepAlive.loop = true;
+      mediaKeepAlive.setAttribute('playsinline', '');
+      mediaKeepAlive.setAttribute('x-webkit-airplay', 'deny');
+      mediaKeepAlive.preload = 'auto';
+    }
+    if (mediaKeepAlive.paused) {
+      mediaKeepAlive.play()
+        .then(() => { mediaModeState = '켜짐 (무음 모드에서도 소리)'; })
+        .catch((e) => { mediaModeState = `켜기 실패: ${e?.name ?? e}`; });
+    }
+  } catch (e) { mediaModeState = `켜기 실패: ${e}`; }
+}
+// 다른 앱으로 갔다 오면 다시 켬
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) mediaKeepAlive?.pause();
+});
+
+/** 첫 터치 때 호출: 모바일은 탭 안에서 오디오를 깨워야 소리가 남 */
 export function unlockAudio() {
+  startMediaMode();
   try {
     ac ??= new AudioContext();
     if (ac.state === 'suspended') void ac.resume();

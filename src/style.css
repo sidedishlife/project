@@ -308,6 +308,8 @@ button.quest:active { background: var(--paper-2); }
 .dg-row span { color: var(--muted); flex-shrink: 0; }
 .dg-row b { text-align: right; min-width: 0; overflow-wrap: anywhere; font-weight: 700; }
 .dg-row.bad b { color: var(--coral-d); }
+.sound-help { margin-top: 10px; }
+.sound-help summary { font-weight: 800; font-size: 14px; color: var(--pink-d); cursor: pointer; }
 .help { margin: 12px 0 0; padding-left: 18px; font-size: 14px; display: grid; gap: 8px; }
 .rec-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .rec-grid div { background: var(--paper-2); border-radius: 16px; padding: 12px 4px; text-align: center; }

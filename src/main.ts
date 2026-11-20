@@ -11,7 +11,7 @@ import {
   loadCards, saveCards, loadStats, saveStats, loadSettings, saveSettings, touchStreak, exportBackup, importBackup, fixStats, loadTombstones, addTombstone, requestPersistentStorage,
 } from './store';
 import {
-  levelOf, xpForLevel, FORMS, formIndex, ballSVG, josa, rarity, QUESTS, BADGES, sfx, setSound, confetti, floatXp, unlockAudio, audioState,
+  levelOf, xpForLevel, FORMS, formIndex, ballSVG, josa, rarity, QUESTS, BADGES, sfx, setSound, confetti, floatXp, unlockAudio, audioState, mediaModeState,
 } from './game';
 
 // ───────────────────────── 상태 ─────────────────────────
@@ -416,6 +416,7 @@ function soundStatusHTML() {
       ${row('영어 음성', d.synth ? `${d.enVoices}개 (전체 ${d.voices}개)` : '없음', !d.synth || d.enVoices === 0)}
       ${row('Claude 음성', d.claude ? '사용 가능' : '이 화면에선 안 됨')}
       ${row('효과음 엔진', audioState())}
+      ${row('무음 모드 우회', mediaModeState, mediaModeState.startsWith('켜기 실패'))}
       ${row('마지막 재생', d.last, d.fail > 0 && d.ok === 0)}
     </div>
     <div class="row tight">
@@ -423,13 +424,16 @@ function soundStatusHTML() {
       <button class="btn sm plain" data-action="sfx-test">${icon('bell')} 효과음 테스트</button>
     </div>
   </div>
-  ${!ok || d.place === '앱 안 화면' ? soundHelpHTML() : ''}`;
+  <details class="sound-help" ${!ok || d.place === '앱 안 화면' ? 'open' : ''}>
+    <summary>재생 성공인데 소리가 안 들리면?</summary>
+    ${soundHelpHTML()}
+  </details>`;
 }
 
 function soundHelpHTML() {
   return `<ul class="help">
     <li><b>Claude 앱 안에서 열었다면</b> → 이 링크를 복사해서 <b>크롬(안드로이드)</b>이나 <b>사파리(아이폰)</b>에 붙여 넣어 열어 주세요. 앱 안 화면은 음성 읽기를 막는 경우가 많아요.</li>
-    <li><b>아이폰</b>: 옆면 무음 스위치를 끄고, 음량 버튼을 눌러 미디어 음량을 올려 주세요.</li>
+    <li><b>아이폰</b>: <b>무음 모드를 꺼 주세요.</b> 옆면 스위치(빨간색이 보이면 무음), 또는 제어 센터의 종 모양 버튼이에요. 그다음 소리가 나는 동안 음량 버튼(+)을 눌러 주세요.</li>
     <li><b>안드로이드</b>: 설정 › 일반 관리 › 텍스트 음성 변환에서 <b>Google 음성 엔진</b>을 고르고 영어 음성 데이터를 설치해 주세요.</li>
     <li>그래도 안 되면 이 상자를 캡처해서 보내 주세요. 원인을 바로 찾을 수 있어요.</li>
   </ul>`;
@@ -1051,7 +1055,7 @@ document.addEventListener('click', async (e) => {
 
 // 첫 터치 때 소리 잠금 해제 (모바일은 탭 안에서 한 번 소리를 깨워야 함)
 document.addEventListener('pointerdown', () => { unlockSpeech(); unlockAudio(); }, { capture: true });
-document.addEventListener('touchend', () => { unlockSpeech(); unlockAudio(); }, { capture: true, once: true });
+document.addEventListener('touchend', () => { unlockSpeech(); unlockAudio(); }, { capture: true });
 
 // 영어 음성을 낼 수 없으면 한 번 안내
 let soundHelpShown = false;
