@@ -3,13 +3,14 @@ import type { Card, Word } from './types';
 import { generateExpression, lookupWord, friendlyError, type Expression } from './api';
 import { inArtifact, sampleCap, downloadsCap, remoteWrite, remoteLoadAll, onSync, hasUnsaved, type SyncState } from './platform';
 import { mergeCards, mergeStats } from './sync';
+import { sticker, stickerRaw, STICKERS, GOLD_LEVEL, newlyUnlocked, type StickerName } from './stickers';
 import { schedule, isDue, newCardSchedule, formatDue, STAGE_LABELS, type Grade } from './srs';
 import { speak, stopSpeaking, listenKorean, stopListening, sttSupported, ttsSupported, speechEngine, unlockSpeech } from './speech';
 import {
   loadCards, saveCards, loadStats, saveStats, loadSettings, saveSettings, touchStreak, exportBackup, importBackup, fixStats, loadTombstones, addTombstone, requestPersistentStorage,
 } from './store';
 import {
-  levelOf, xpForLevel, FORMS, formIndex, heroSVG, ballSVG, josa, rarity, QUESTS, BADGES, sfx, setSound, confetti, floatXp, unlockAudio,
+  levelOf, xpForLevel, FORMS, formIndex, ballSVG, josa, rarity, QUESTS, BADGES, sfx, setSound, confetti, floatXp, unlockAudio,
 } from './game';
 
 // ───────────────────────── 상태 ─────────────────────────
@@ -48,7 +49,7 @@ const ui = {
   confirmDelete: '',
   newCardId: '', // 방금 획득한 카드(등장 연출)
   filter: 'all',
-  dex: 'cards' as 'cards' | 'badges',
+  dex: 'cards' as 'cards' | 'stickers' | 'badges',
 };
 
 interface Session {
@@ -78,6 +79,7 @@ let loopToken = 0;
 let looping = false;
 
 // 레벨업 연출 대기열 (렌더 후 표시)
+let petTimer: ReturnType<typeof setTimeout> | undefined;
 let pendingLevelUp: { from: number; to: number } | null = null;
 
 const app = document.getElementById('app')!;
@@ -222,16 +224,14 @@ function xpBarHTML(xp: number) {
 }
 
 // ───────────────────────── 홈 ─────────────────────────
-/** 스티커처럼 말하는 말풍선 */
-const bubble = (text: string, cls = '') => `<span class="say ${cls}">${esc(text)}</span>`;
 
 function homeView() {
   const due = dueCards();
   const lv = levelOf(stats.xp);
   const f = formIndex(lv);
-  const nextForm = FORMS[f + 1];
+  const nextSticker = STICKERS.find((x) => x.lv > lv);
   const next = cards.filter((c) => !isDue(c)).sort((a, b) => a.due - b.due)[0];
-  const say = !cards.length ? '안녕! 나랑 영어 놀이하자' : due.length ? '놀자! 놀자!' : '쿨쿨…';
+  const face: StickerName = !cards.length ? 'wink' : due.length ? 'excited' : 'yawn';
   // 퀘스트 = 오늘 할 일. 각 줄을 누르면 바로 그 일을 하러 감
   const questGo: Record<string, string> = { fight: due.length ? 'start-review' : '', make: 'go-create', listen: cards.length ? 'go-list' : 'go-create' };
   return `
@@ -242,13 +242,10 @@ function homeView() {
   </header>
 
   <section class="home-hero">
-    <div class="hero-wrap">
-      ${bubble(say, due.length ? 'bounce' : '')}
-      <button class="hero-stage big pettable" data-action="pet" aria-label="${esc(pet())} 쓰다듬기">${heroSVG(lv, due.length ? 'happy' : 'idle')}</button>
-    </div>
+    <button class="hero-stage big pettable" data-action="pet" data-face="${face}" aria-label="${esc(pet())} 쓰다듬기">${sticker(face, lv)}</button>
     <div class="pet-line"><b class="pet-name">${esc(pet())}</b><span class="lv-pill">Lv.${lv}</span><span class="title-chip">${FORMS[f].title}</span></div>
     ${xpBarHTML(stats.xp)}
-    <p class="unlock">${nextForm ? `Lv.${nextForm.lv}에 <b>${nextForm.item}</b> 선물 · ${nextForm.title}` : '다 자랐어요! 👑'}</p>
+    <p class="unlock">${nextSticker ? `Lv.${nextSticker.lv}에 <b>'${nextSticker.label}'</b> 스티커가 열려요` : lv >= GOLD_LEVEL ? '모든 스티커 수집 완료! 👑' : `Lv.${GOLD_LEVEL}에 <b>황금 테두리</b>가 열려요`}</p>
   </section>
 
   <section class="panel today ${due.length ? 'ready' : ''}">
@@ -281,7 +278,7 @@ function createView() {
   return `
   <section class="panel maker">
     <div class="maker-head">
-      <div class="peek">${heroSVG(levelOf(stats.xp), ui.busy ? 'happy' : 'idle')}</div>
+      <div class="peek">${sticker(ui.busy ? 'what' : 'wink', levelOf(stats.xp))}</div>
       <div><h2 class="screen-title">표현 만들기</h2><p class="sub">영어로 하고 싶은 말을 한국어로 쓰거나 말해 보세요.</p></div>
     </div>
     <textarea id="ko" rows="3" placeholder="예) ${EXAMPLES[0]}">${esc(ui.draftKo)}</textarea>
@@ -334,8 +331,21 @@ function listItem(c: Card) {
 function listView() {
   const seg = `<div class="seg" role="tablist">
       <button class="${ui.dex === 'cards' ? 'on' : ''}" data-action="dex" data-d="cards" role="tab">🃏 카드 ${cards.length}</button>
+      <button class="${ui.dex === 'stickers' ? 'on' : ''}" data-action="dex" data-d="stickers" role="tab">🐶 스티커 ${STICKERS.filter((x) => x.lv <= levelOf(stats.xp)).length}/${STICKERS.length}</button>
       <button class="${ui.dex === 'badges' ? 'on' : ''}" data-action="dex" data-d="badges" role="tab">🏅 배지 ${stats.badges.length}/${BADGES.length}</button>
     </div>`;
+  if (ui.dex === 'stickers') {
+    const lv = levelOf(stats.xp);
+    return `
+    <section class="panel">
+      <h2 class="screen-title">도감</h2>${seg}
+      <p class="hint">레벨이 오르면 ${esc(petGa())} 새 표정을 보여줘요.${lv >= GOLD_LEVEL ? ' 황금 테두리 획득!' : ` Lv.${GOLD_LEVEL}에는 황금 테두리가 생겨요.`}</p>
+      <div class="sticker-grid">${STICKERS.map((x) => {
+        const open = lv >= x.lv;
+        return `<div class="st-cell ${open ? 'open' : 'locked'}">${stickerRaw(x.name, lv >= GOLD_LEVEL && open ? 'gold' : '')}<b>${open ? x.label : `Lv.${x.lv}에 열려요`}</b><small>${x.when}</small></div>`;
+      }).join('')}</div>
+    </section>`;
+  }
   if (ui.dex === 'badges') {
     return `
     <section class="panel">
@@ -374,7 +384,7 @@ function detailView() {
   <button class="back" data-action="nav" data-view="list">‹ 도감</button>
   <section class="panel result tcg card-${r.key} ${isNew ? 'reveal' : ''}">
     <div class="tcg-top">${rarityChip(c)}<span class="stage-chip">기억 단계 ${c.stage}/${STAGE_LABELS.length - 1} · ${STAGE_LABELS[c.stage]}</span></div>
-    ${isNew ? '<div class="got">NEW CARD!</div>' : ''}
+    ${isNew ? `<div class="got-wrap"><div class="peek">${sticker('surprised', levelOf(stats.xp), 'swap')}</div><div class="got">새 카드 획득!</div></div>` : ''}
     <div class="ko">${esc(c.ko)}</div>
     <div class="en">${sentenceHTML(c.en, c.id)}</div>
     ${playerHTML(c)}
@@ -497,10 +507,9 @@ function setupRound() {
 
 function arenaHTML(s: Session) {
   const left = s.queue.length - s.idx;
-  const mood = s.arena === 'hit' ? 'happy' : s.arena === 'laugh' ? 'sad' : 'idle';
   return `
   <div class="arena">
-    <div class="fighter hero-side ${s.arena === 'hit' ? 'jump' : ''}">${s.arena === 'hit' ? bubble('신나!', 'pop') : s.arena === 'laugh' ? bubble('힝…', 'pop') : ''}${heroSVG(levelOf(stats.xp), mood)}</div>
+    <div class="fighter hero-side ${s.arena === 'hit' ? 'jump' : s.arena === 'laugh' ? 'shake' : ''}">${sticker(s.arena === 'hit' ? 'happy' : s.arena === 'laugh' ? 'angry' : 'excited', levelOf(stats.xp), s.arena !== 'idle' ? 'swap' : '')}</div>
     <div class="vs">${s.combo >= 2 ? `<div class="combo">🔥 ${s.combo} COMBO</div>` : '<span class="dots">· · ·</span>'}</div>
     <div class="fighter mon-side ${s.arena === 'hit' ? 'fetch' : s.arena === 'laugh' ? 'rollaway' : 'float'}">${ballSVG()}</div>
   </div>
@@ -565,7 +574,7 @@ function summaryView() {
   <section class="panel summary">
     <div class="stars">${[1, 2, 3].map((i) => `<span class="star ${i <= stars ? 'on' : ''}" style="--d:${i * 0.18}s">★</span>`).join('')}</div>
     <h2 class="screen-title">놀이 끝!</h2><p class="sub">${esc(petGa())} 공을 ${s.defeated}개나 물어왔어요</p>
-    <div class="hero-wrap">${bubble('신나!', 'bounce')}<div class="hero-stage big">${heroSVG(lv, 'happy')}</div></div>
+    <div class="hero-stage big">${sticker(stars >= 2 ? 'happy' : 'what', lv, 'swap')}</div>
     <div class="sum-grid">
       <div><b>${s.defeated}</b><span>물어온 공</span></div>
       <div><b>${acc}%</b><span>정확도</span></div>
@@ -630,7 +639,7 @@ function showOutcome(ok: boolean) {
 
 // ───────────────────────── 레벨업 연출 ─────────────────────────
 function showLevelUp(from: number, to: number) {
-  const evolved = formIndex(to) > formIndex(from);
+  const fresh = newlyUnlocked(from, to);
   const f = FORMS[formIndex(to)];
   const el = document.createElement('div');
   el.className = 'levelup';
@@ -639,8 +648,8 @@ function showLevelUp(from: number, to: number) {
       <div class="lu-rays"></div>
       <div class="lu-tag">LEVEL UP</div>
       <div class="lu-lv"><span>Lv.${from}</span> → <b>Lv.${to}</b></div>
-      <div class="hero-wrap">${bubble('신나!', 'bounce')}<div class="hero-stage big">${heroSVG(to, 'happy')}</div></div>
-      <div class="lu-evo">${esc(petGa())} 쑥 자랐어요!${evolved ? ` <b>${f.item}</b> 선물 획득` : ''}</div>
+      <div class="hero-stage big">${fresh.length ? stickerRaw(fresh[0].name, 'swap') : sticker('cool', to, 'swap')}</div>
+      ${fresh.length ? `<div class="lu-evo">새 스티커 획득! <b>'${fresh[0].label}'</b></div>` : to >= GOLD_LEVEL && from < GOLD_LEVEL ? '<div class="lu-evo">황금 테두리 획득! 👑</div>' : ''}
       <div class="title-chip big">${f.title}</div>
       <button class="btn go xl" data-action="close-levelup">계속하기</button>
     </div>`;
@@ -905,11 +914,11 @@ document.addEventListener('click', async (e) => {
       return closeSheet();
     case 'pet': {
       sfx('bark');
-      const svg = el.querySelector('svg');
-      svg?.classList.remove('petted');
-      void (svg as unknown as HTMLElement)?.getBoundingClientRect();
-      svg?.classList.add('petted');
       floatXp('❤️', el);
+      const back = el.dataset.face as StickerName;
+      el.innerHTML = sticker('love', levelOf(stats.xp), 'swap petted');
+      clearTimeout(petTimer);
+      petTimer = setTimeout(() => { if (el.isConnected) el.innerHTML = sticker(back, levelOf(stats.xp), 'swap'); }, 1600);
       return;
     }
     case 'example':
@@ -920,7 +929,7 @@ document.addEventListener('click', async (e) => {
       return go('list', { filter: el.dataset.f!, dex: 'cards' });
     case 'dex':
       sfx('tap');
-      ui.dex = el.dataset.d as 'cards' | 'badges';
+      ui.dex = el.dataset.d as 'cards' | 'stickers' | 'badges';
       return render();
     case 'go-create':
       return go('create');
