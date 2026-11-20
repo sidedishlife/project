@@ -59,21 +59,32 @@ function toGemini(schema: any): any {
 
 export class AIError extends Error {}
 
+/** JSON만 오지 않아도(코드 블록, 앞뒤 설명) 가운데 JSON을 찾아 읽음 */
+function parseLoose(text: string): unknown {
+  const tries = [text, text.replace(/^```(?:json)?\s*|\s*```$/g, '')];
+  const a = text.indexOf('{'), b = text.lastIndexOf('}');
+  if (a >= 0 && b > a) tries.push(text.slice(a, b + 1));
+  for (const t of tries) { try { return JSON.parse(t); } catch { /* 다음 방법 */ } }
+  return undefined;
+}
+
 let workingModel = ''; // 한 번 성공한 모델은 계속 사용
 
 async function askGemini<T>(key: string, system: string, user: string, schema: object, maxTokens: number): Promise<T> {
   const models = workingModel ? [workingModel] : GEMINI_MODELS;
   let lastErr: Error | null = null;
-  for (const m of models) {
+  let useSchema = true; // 형식 지정이 거절되면 지시문으로만 형식을 요청
+  for (let mi = 0; mi < models.length; mi++) {
+    const m = models[mi];
     let res: Response;
     try {
       res = await fetch(GEMINI_URL(m), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
         body: JSON.stringify({
-          systemInstruction: { parts: [{ text: system }] },
+          systemInstruction: { parts: [{ text: useSchema ? system : `${system}\n\n반드시 다음 JSON 스키마에 맞는 JSON 하나만 답하세요:\n${JSON.stringify(schema)}` }] },
           contents: [{ role: 'user', parts: [{ text: user }] }],
-          generationConfig: { responseMimeType: 'application/json', responseSchema: toGemini(schema), maxOutputTokens: maxTokens, temperature: 0.6 },
+          generationConfig: { responseMimeType: 'application/json', ...(useSchema ? { responseSchema: toGemini(schema) } : {}), maxOutputTokens: maxTokens, temperature: 0.6 },
         }),
       });
     } catch {
@@ -86,18 +97,17 @@ async function askGemini<T>(key: string, system: string, user: string, schema: o
       if (res.status === 400 && /API_KEY/.test(reason + JSON.stringify(body))) throw new AIError('Gemini API 키가 올바르지 않아요. 설정에서 확인해 주세요.');
       if (res.status === 403) throw new AIError('이 키로는 Gemini를 쓸 수 없어요. Google AI Studio에서 키를 다시 확인해 주세요.');
       if (res.status === 429) throw new AIError('오늘 무료 사용량을 다 썼거나 너무 빨리 요청했어요. 잠시 후(또는 내일) 다시 시도해 주세요.');
-      throw new AIError(`Gemini 오류(${res.status}). 잠시 후 다시 시도해 주세요.`);
+      if (res.status === 400 && useSchema) { useSchema = false; mi--; continue; } // 같은 모델로 형식 지정 없이 한 번 더
+      throw new AIError(`Gemini 오류(${res.status}): ${body?.error?.message ?? '알 수 없는 오류'}`);
     }
     workingModel = m;
     const cand = body?.candidates?.[0];
     if (!cand || cand.finishReason === 'SAFETY' || cand.finishReason === 'PROHIBITED_CONTENT') throw new AIError('이 요청은 처리할 수 없어요. 표현을 바꿔서 다시 시도해 주세요.');
     if (cand.finishReason === 'MAX_TOKENS') throw new AIError('응답이 너무 길어 잘렸어요. 문장을 짧게 나눠서 시도해 주세요.');
-    const text = (cand.content?.parts ?? []).map((p: any) => p.text ?? '').join('');
-    try {
-      return JSON.parse(text) as T;
-    } catch {
-      throw new AIError('답을 읽지 못했어요. 한 번 더 눌러 주세요.');
-    }
+    const text = (cand.content?.parts ?? []).filter((p: any) => !p.thought).map((p: any) => p.text ?? '').join('');
+    const parsed = parseLoose(text);
+    if (parsed === undefined) throw new AIError(`답을 읽지 못했어요. 한 번 더 눌러 주세요. (받은 답: ${text.slice(0, 80) || '비어 있음'})`);
+    return parsed as T;
   }
   throw lastErr ?? new AIError('Gemini에 연결하지 못했어요.');
 }
@@ -132,18 +142,33 @@ export interface Expression {
   words: Word[];
 }
 
-export function generateExpression(key: string, ko: string): Promise<Expression> {
-  return askJSON<Expression>(key, SYSTEM, `영어로 이렇게 말하고 싶어요:\n${ko}`, EXPRESSION_SCHEMA, 8192);
+const str = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v));
+function normWord(w: any): Word {
+  return { word: str(w?.word), lemma: str(w?.lemma || w?.word), pos: str(w?.pos), ipa: str(w?.ipa), meaning_ko: str(w?.meaning_ko ?? w?.meaning), example_en: str(w?.example_en ?? w?.example) };
 }
 
-export function lookupWord(key: string, word: string, sentence: string): Promise<Word> {
-  return askJSON<Word>(
+export async function generateExpression(key: string, ko: string): Promise<Expression> {
+  let r: any = await askJSON<any>(key, SYSTEM, `영어로 이렇게 말하고 싶어요:\n${ko}`, EXPRESSION_SCHEMA, 8192);
+  if (Array.isArray(r)) r = r[0];
+  if (r && !r.en && typeof r === 'object') r = Object.values(r).find((v: any) => v && typeof v === 'object' && v.en) ?? r; // {expression:{...}} 같은 포장
+  const en = str(r?.en ?? r?.english).trim();
+  if (!en) throw new AIError('영어 표현을 받지 못했어요. 한 번 더 눌러 주세요.');
+  return {
+    en,
+    alts: (Array.isArray(r?.alts) ? r.alts : []).map(str).filter(Boolean).slice(0, 2),
+    note_ko: str(r?.note_ko ?? r?.note),
+    words: (Array.isArray(r?.words) ? r.words : []).map(normWord).filter((w: Word) => w.word),
+  };
+}
+
+export async function lookupWord(key: string, word: string, sentence: string): Promise<Word> {
+  return normWord(await askJSON<Word>(
     key,
     '당신은 한국인 학습자를 위한 영한 사전입니다. 주어진 문장 맥락에서의 뜻을 설명합니다.',
     `문장: ${sentence}\n단어: ${word}`,
     WORD_SCHEMA,
     2048,
-  );
+  ));
 }
 
 /** 키 확인: 아주 짧은 요청을 보내 연결되는지 봄 */

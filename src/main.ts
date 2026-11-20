@@ -972,6 +972,7 @@ document.addEventListener('click', async (e) => {
         playOnce('draft');
       } catch (err) {
         ui.busy = false;
+        ui.draft = null; // 그리다 실패한 표현은 버리고 오류를 보여줌
         ui.error = friendlyError(err);
         render();
       }
