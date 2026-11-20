@@ -113,6 +113,12 @@ const putStats = () => {
   // 계정 기록을 합치기 전에는 올리지 않음 (계정의 더 큰 XP를 덮어쓰지 않도록)
   if (loaded) remoteWrite('_stats', stats as unknown as Record<string, unknown>);
 };
+// 아이폰은 claude.ai 화면 안에서 영어 음성이 막혀 있어, 20회 듣기는 사파리에서 여는 별도 페이지로 보냄
+// 문장은 주소의 # 뒤에만 실리므로 서버로 전송되지 않음
+const LISTEN_URL = 'https://sidedishlife.github.io/project/listen/';
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const listenHref = (list: { en: string; ko: string }[]) =>
+  `${LISTEN_URL}#n=${settings.listenTarget}&r=${settings.rate}&` + list.map((c) => 's=' + encodeURIComponent(`${c.en}|${c.ko}`)).join('&');
 const pet = () => stats.petName || '콩이';
 const petGa = () => pet() + josa(pet(), '이', '가');
 const dueCards = () => cards.filter((c) => isDue(c)).sort((a, b) => a.due - b.due);
@@ -201,7 +207,9 @@ function playerHTML(card: Card) {
     <div class="player-info">
       <div class="count"><b id="listen-count">${card.listens}</b><span>/ ${target}회</span>${card.listens >= target ? '<em class="done-chip">완주</em>' : ''}</div>
       <div class="row tight">
-        <button class="btn sm ${looping ? 'red' : 'pink'}" data-action="loop" data-id="${card.id}">${looping ? `${icon('close')} 정지` : `${icon('repeat')} ${left}회 연속`}</button>
+        ${isIOS
+          ? `<a class="btn sm pink" href="${esc(listenHref([{ en: card.en, ko: card.ko }]))}" target="_blank" rel="noopener" data-action="listen-out">${icon('headphones')} 사파리에서 ${settings.listenTarget}회 듣기</a>`
+          : `<button class="btn sm ${looping ? 'red' : 'pink'}" data-action="loop" data-id="${card.id}">${looping ? `${icon('close')} 정지` : `${icon('repeat')} ${left}회 연속`}</button>`}
         <button class="btn sm plain" data-action="slow" data-id="${card.id}">${icon('slow')} 천천히</button>
       </div>
     </div>
@@ -262,6 +270,10 @@ function homeView() {
         <span class="pc-count">${due.length}</span>
       </button>` : `
       <div class="rest">${stickerRaw('yawn', 'rest-st')}<span>${next ? `다음 놀이는 <b>${formatDue(next)}</b>에 열려요` : '표현을 만들면 10분 뒤 첫 놀이가 열려요'}</span></div>`}
+    ${isIOS && cards.length ? (() => {
+      const list = (due.length ? due : cards.slice(-10).reverse()).slice(0, 15);
+      return `<a class="listen-all" href="${esc(listenHref(list))}" target="_blank" rel="noopener" data-action="listen-out">${icon('headphones')}<span><b>사파리에서 모두 듣기</b><small>${due.length ? '놀이 대기' : '최근'} 표현 ${list.length}개 · 각 ${settings.listenTarget}회</small></span>${icon('next')}</a>`;
+    })() : ''}
     <div class="quests">${QUESTS.map((q) => {
       const v = Math.min(q.value(stats), q.goal);
       const done = stats.day.claimed.includes(q.id);
@@ -866,7 +878,7 @@ document.addEventListener('click', async (e) => {
   const el = (e.target as HTMLElement).closest<HTMLElement>('[data-action]');
   if (!el) return;
   const a = el.dataset.action!;
-  if (el.tagName === 'A') e.preventDefault();
+  if (el.tagName === 'A' && a !== 'listen-out') e.preventDefault();
 
   switch (a) {
     case 'nav':
@@ -976,6 +988,13 @@ document.addEventListener('click', async (e) => {
       sfx('tap');
       ui.dex = el.dataset.d as 'cards' | 'stickers' | 'badges';
       return render();
+    case 'listen-out': {
+      // 바깥 페이지에서 들은 횟수는 앱이 알 수 없어, 듣기 페이지를 연 것으로 퀘스트만 인정
+      stats = fixStats(stats);
+      stats.day.loops++;
+      gainXp(5, el);
+      return;
+    }
     case 'go-stickers':
       return go('list', { dex: 'stickers' });
     case 'go-create':

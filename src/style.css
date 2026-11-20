@@ -180,6 +180,12 @@ input[type=range] { width: 100%; accent-color: var(--pink); }
 .rest { display: flex; gap: 12px; align-items: center; background: var(--paper-2); border-radius: 20px; padding: 10px 14px 10px 8px; margin-bottom: 14px; color: var(--muted); font-size: 14px; }
 .rest b { color: var(--text); }
 .rest-st { width: 56px !important; height: 60px !important; flex-shrink: 0; animation: none !important; }
+.listen-all { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; text-decoration: none; color: var(--text); background: var(--pink-soft); border-radius: 18px; padding: 12px 14px; margin-bottom: 12px; }
+.listen-all > .ic { color: var(--pink-d); }
+.listen-all > .ic:last-child { color: var(--muted); width: 16px; height: 16px; }
+.listen-all span { display: grid; line-height: 1.3; }
+.listen-all b { font-size: 15px; } .listen-all small { font-size: 12px; color: var(--muted); font-weight: 600; }
+a.btn { text-decoration: none; }
 .quests { display: grid; gap: 4px; }
 .quest { display: grid; grid-template-columns: 40px 1fr auto auto; gap: 12px; align-items: center; padding: 10px 6px; border-radius: 16px; background: none; border: 0; width: 100%; text-align: left; font: inherit; color: var(--text); }
 button.quest { cursor: pointer; }
