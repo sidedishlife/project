@@ -117,8 +117,15 @@ const putStats = () => {
 // 문장은 주소의 # 뒤에만 실리므로 서버로 전송되지 않음
 const LISTEN_URL = 'https://sidedishlife.github.io/project/listen/';
 const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const b64url = (text: string) => {
+  const bytes = new TextEncoder().encode(text);
+  let bin = '';
+  bytes.forEach((b) => (bin += String.fromCharCode(b)));
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
 const listenHref = (list: { en: string; ko: string }[]) =>
-  `${LISTEN_URL}#n=${settings.listenTarget}&r=${settings.rate}&` + list.map((c) => 's=' + encodeURIComponent(`${c.en}|${c.ko}`)).join('&');
+  `${LISTEN_URL}#d=${b64url(JSON.stringify({ n: settings.listenTarget, r: settings.rate, s: list.map((c) => [c.en, c.ko]) }))}`;
+let listenList: { en: string; ko: string }[] = [];
 const pet = () => stats.petName || '콩이';
 const petGa = () => pet() + josa(pet(), '이', '가');
 const dueCards = () => cards.filter((c) => isDue(c)).sort((a, b) => a.due - b.due);
@@ -208,7 +215,7 @@ function playerHTML(card: Card) {
       <div class="count"><b id="listen-count">${card.listens}</b><span>/ ${target}회</span>${card.listens >= target ? '<em class="done-chip">완주</em>' : ''}</div>
       <div class="row tight">
         ${isIOS
-          ? `<a class="btn sm pink" href="${esc(listenHref([{ en: card.en, ko: card.ko }]))}" target="_blank" rel="noopener" data-action="listen-out">${icon('headphones')} 사파리에서 ${settings.listenTarget}회 듣기</a>`
+          ? `<button class="btn sm pink" data-action="listen-sheet" data-id="${card.id}">${icon('headphones')} 사파리에서 ${settings.listenTarget}회 듣기</button>`
           : `<button class="btn sm ${looping ? 'red' : 'pink'}" data-action="loop" data-id="${card.id}">${looping ? `${icon('close')} 정지` : `${icon('repeat')} ${left}회 연속`}</button>`}
         <button class="btn sm plain" data-action="slow" data-id="${card.id}">${icon('slow')} 천천히</button>
       </div>
@@ -272,7 +279,7 @@ function homeView() {
       <div class="rest">${stickerRaw('yawn', 'rest-st')}<span>${next ? `다음 놀이는 <b>${formatDue(next)}</b>에 열려요` : '표현을 만들면 10분 뒤 첫 놀이가 열려요'}</span></div>`}
     ${isIOS && cards.length ? (() => {
       const list = (due.length ? due : cards.slice(-10).reverse()).slice(0, 15);
-      return `<a class="listen-all" href="${esc(listenHref(list))}" target="_blank" rel="noopener" data-action="listen-out">${icon('headphones')}<span><b>사파리에서 모두 듣기</b><small>${due.length ? '놀이 대기' : '최근'} 표현 ${list.length}개 · 각 ${settings.listenTarget}회</small></span>${icon('next')}</a>`;
+      return `<button class="listen-all" data-action="listen-sheet" data-ids="${list.map((c) => c.id).join(',')}">${icon('headphones')}<span><b>사파리에서 모두 듣기</b><small>${due.length ? '놀이 대기' : '최근'} 표현 ${list.length}개 · 각 ${settings.listenTarget}회</small></span>${icon('next')}</button>`;
     })() : ''}
     <div class="quests">${QUESTS.map((q) => {
       const v = Math.min(q.value(stats), q.goal);
@@ -988,11 +995,34 @@ document.addEventListener('click', async (e) => {
       sfx('tap');
       ui.dex = el.dataset.d as 'cards' | 'stickers' | 'badges';
       return render();
-    case 'listen-out': {
-      // 바깥 페이지에서 들은 횟수는 앱이 알 수 없어, 듣기 페이지를 연 것으로 퀘스트만 인정
-      stats = fixStats(stats);
-      stats.day.loops++;
-      gainXp(5, el);
+    case 'listen-sheet': {
+      const ids = el.dataset.ids ? el.dataset.ids.split(',') : [el.dataset.id!];
+      listenList = ids.map((id) => (id === 'draft' && ui.draft ? { en: ui.draft.en, ko: ui.draftKo } : getCard(id))).filter(Boolean).map((c) => ({ en: c!.en, ko: c!.ko }));
+      const href = listenHref(listenList);
+      openSheet(`
+        <div class="sheet-word">사파리에서 듣기</div>
+        <p class="hint">아이폰은 이 화면 안에서 영어 음성이 나오지 않아서, 사파리의 듣기 페이지에서 ${settings.listenTarget}회씩 들려줘요. 문장 ${listenList.length}개.</p>
+        <a class="btn pink xl" href="${esc(href)}" target="_blank" rel="noopener" data-action="listen-out">${icon('headphones')} 사파리에서 열기</a>
+        <button class="btn plain xl" data-action="listen-copy">링크 복사</button>
+        <p class="hint">열기가 안 되면 <b>링크 복사</b>를 누르고, 사파리 주소창에 붙여 넣어 주세요.</p>
+        <input id="listen-url" type="text" readonly value="${esc(href)}" aria-label="듣기 링크">`);
+      return;
+    }
+    case 'listen-out':
+    case 'listen-copy': {
+      if (a === 'listen-copy') {
+        const href = listenHref(listenList);
+        const box = document.getElementById('listen-url') as HTMLInputElement | null;
+        navigator.clipboard?.writeText(href).then(
+          () => { el.textContent = '복사했어요 · 사파리 주소창에 붙여 넣어 주세요'; },
+          () => { box?.focus(); box?.select(); el.textContent = '아래 링크를 길게 눌러 복사해 주세요'; },
+        ) ?? (box?.select());
+      }
+      // 바깥 페이지에서 들은 횟수는 앱이 알 수 없어, 듣기 페이지를 연 것으로 퀘스트만 인정 (화면은 클릭이 끝난 뒤 갱신)
+      setTimeout(() => {
+        stats = fixStats(stats);
+        if (!stats.day.claimed.includes('listen')) { stats.day.loops++; gainXp(5); render(); }
+      }, 300);
       return;
     }
     case 'go-stickers':
