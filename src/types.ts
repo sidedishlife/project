@@ -21,6 +21,7 @@ export interface Card {
   listens: number; // 누적 듣기 횟수
   reviews: number;
   lapses: number; // 잊어버린 횟수
+  updatedAt?: number; // 마지막 변경 시각 (기기 간 병합 기준)
 }
 
 /** 오늘 하루 기록 (일일 퀘스트용) */

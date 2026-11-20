@@ -1,6 +1,6 @@
 import type { Card, Settings, Stats } from './types';
 
-const K = { cards: 'ee.cards', stats: 'ee.stats', settings: 'ee.settings' };
+const K = { cards: 'ee.cards', stats: 'ee.stats', settings: 'ee.settings', dead: 'ee.deleted' };
 
 function read<T>(key: string, fallback: T): T {
   try {
@@ -65,4 +65,17 @@ export function importBackup(json: string) {
   if (!Array.isArray(data.cards)) throw new Error('올바른 백업 파일이 아닙니다');
   saveCards(data.cards);
   if (data.stats) saveStats(data.stats);
+}
+
+/** 지운 카드 id 목록: 다른 기기 기록과 합칠 때 되살아나지 않게 */
+export function loadTombstones(): string[] {
+  try { return JSON.parse(localStorage.getItem(K.dead) || '[]'); } catch { return []; }
+}
+export function addTombstone(id: string) {
+  write(K.dead, [...loadTombstones(), id].slice(-500));
+}
+
+/** 브라우저가 저장 공간을 임의로 비우지 않도록 요청 (지원되는 곳만) */
+export function requestPersistentStorage() {
+  try { void navigator.storage?.persist?.(); } catch { /* 미지원 */ }
 }

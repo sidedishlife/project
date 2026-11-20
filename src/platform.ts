@@ -27,20 +27,54 @@ export const deckCap: Promise<{ col: Any } | null> = (async () => {
   return { col: db.collection(`data/users/${id}`) };
 })();
 
-// 같은 문서에는 한 번에 하나씩 쓰기
-const chains = new Map<string, Promise<unknown>>();
+// ── 계정 저장: 문서마다 최신 값만 보관했다가 차례로 저장, 실패하면 다시 시도
+export type SyncState = 'local' | 'saving' | 'saved' | 'retrying';
+let syncState: SyncState = 'local';
+const listeners = new Set<(s: SyncState) => void>();
+export const onSync = (fn: (s: SyncState) => void) => { listeners.add(fn); fn(syncState); };
+const setSync = (s: SyncState) => { syncState = s; listeners.forEach((f) => f(s)); };
+deckCap.then((d) => setSync(d ? 'saved' : 'local'));
+
+const dirty = new Map<string, Record<string, unknown> | null>(); // null = 삭제
+let flushing = false;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
 export function remoteWrite(docId: string, data: Record<string, unknown> | null) {
-  const prev = chains.get(docId) ?? Promise.resolve();
-  const next = prev.then(async () => {
-    const deck = await deckCap;
-    if (!deck) return;
-    const ref = deck.col.doc(docId);
-    if (data === null) await ref.delete();
-    else await ref.set(JSON.parse(JSON.stringify(data)));
-  }).catch((e) => console.warn('저장 실패', docId, e));
-  chains.set(docId, next);
-  return next;
+  dirty.set(docId, data === null ? null : JSON.parse(JSON.stringify(data)));
+  void flush();
 }
+
+async function flush() {
+  if (flushing) return;
+  const deck = await deckCap;
+  if (!deck) return; // 계정 저장소 없음: 이 기기에만 저장
+  flushing = true;
+  setSync('saving');
+  let failed = false;
+  while (dirty.size) {
+    const [id, data] = dirty.entries().next().value as [string, Record<string, unknown> | null];
+    dirty.delete(id);
+    try {
+      const ref = deck.col.doc(id);
+      if (data === null) await ref.delete();
+      else await ref.set(data);
+    } catch (e) {
+      console.warn('저장 실패, 다시 시도 예정', id, e);
+      if (!dirty.has(id)) dirty.set(id, data); // 더 새 값이 없으면 다시 넣기
+      failed = true;
+      break;
+    }
+  }
+  flushing = false;
+  if (failed) {
+    setSync('retrying');
+    if (retryTimer) clearTimeout(retryTimer);
+    retryTimer = setTimeout(() => void flush(), 15_000);
+  } else setSync(dirty.size ? 'saving' : 'saved');
+}
+addEventListener('online', () => void flush());
+/** 저장 안 된 변경이 있는지 (창 닫기 경고용) */
+export const hasUnsaved = () => dirty.size > 0;
 
 export async function remoteLoadAll(): Promise<Record<string, Any> | null> {
   const deck = await deckCap;

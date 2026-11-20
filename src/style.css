@@ -320,3 +320,6 @@ input[type=range] { width: 100%; accent-color: var(--go); }
 button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visible, label.btn:focus-within { outline: 3px solid var(--safety); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 @media (max-width: 370px) { .badges { grid-template-columns: repeat(3, 1fr); } .profile { grid-template-columns: 92px 1fr; } .hero-stage { width: 92px; height: 92px; } }
+.sync { justify-self: start; border: 2px solid var(--line); background: var(--panel-2); color: var(--muted); border-radius: 999px; padding: 3px 10px; font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; }
+.sync-saved { border-color: var(--go); color: var(--calm); }
+.sync-retrying, .sync-local { border-color: var(--amber); color: var(--text); }

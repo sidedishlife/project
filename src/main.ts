@@ -1,11 +1,12 @@
 import './style.css';
 import type { Card, Word } from './types';
 import { generateExpression, lookupWord, friendlyError, type Expression } from './api';
-import { inArtifact, sampleCap, downloadsCap, remoteWrite, remoteLoadAll } from './platform';
+import { inArtifact, sampleCap, downloadsCap, remoteWrite, remoteLoadAll, onSync, hasUnsaved, type SyncState } from './platform';
+import { mergeCards, mergeStats } from './sync';
 import { schedule, isDue, newCardSchedule, formatDue, STAGE_LABELS, type Grade } from './srs';
 import { speak, stopSpeaking, listenKorean, stopListening, sttSupported, ttsSupported } from './speech';
 import {
-  loadCards, saveCards, loadStats, saveStats, loadSettings, saveSettings, touchStreak, exportBackup, importBackup, fixStats,
+  loadCards, saveCards, loadStats, saveStats, loadSettings, saveSettings, touchStreak, exportBackup, importBackup, fixStats, loadTombstones, addTombstone, requestPersistentStorage,
 } from './store';
 import {
   levelOf, xpForLevel, FORMS, formIndex, heroSVG, monsterSVG, rarity, QUESTS, BADGES, sfx, setSound, confetti, floatXp,
@@ -19,6 +20,18 @@ let cards = loadCards();
 let stats = loadStats();
 let settings = loadSettings();
 setSound(settings.sound);
+let sync: SyncState = 'local';
+let loaded = false; // 계정 기록 불러오기 끝났는지
+onSync((st) => { sync = st; const el = document.getElementById('sync'); if (el) el.outerHTML = syncChip(); });
+function syncChip() {
+  const m: Record<SyncState, [string, string]> = {
+    local: ['📱', '이 기기에만 저장 · 백업 권장'],
+    saving: ['⏳', '계정에 저장 중'],
+    saved: ['☁️', '계정에 저장됨'],
+    retrying: ['⚠️', '저장 재시도 중 · 연결 확인'],
+  };
+  return `<button id="sync" class="sync sync-${sync}" data-action="nav" data-view="settings">${m[sync][0]} ${m[sync][1]}</button>`;
+}
 let hasClaude = false; // claude.ai 안: 내 Claude 계정으로 호출(API 키 불필요)
 sampleCap.then((s) => { hasClaude = !!s; render(); });
 const aiReady = () => hasClaude || !!settings.apiKey;
@@ -81,14 +94,16 @@ const shuffle = <T,>(a: T[]): T[] => {
   return b;
 };
 const getCard = (id: string) => cards.find((c) => c.id === id);
-const updateCard = (c: Card) => {
+const updateCard = (card: Card) => {
+  const c = { ...card, updatedAt: Date.now() };
   cards = cards.map((x) => (x.id === c.id ? c : x));
   saveCards(cards);
   remoteWrite(c.id, c as unknown as Record<string, unknown>);
 };
 const putStats = () => {
   saveStats(stats);
-  remoteWrite('_stats', stats as unknown as Record<string, unknown>);
+  // 계정 기록을 합치기 전에는 올리지 않음 (계정의 더 큰 XP를 덮어쓰지 않도록)
+  if (loaded) remoteWrite('_stats', stats as unknown as Record<string, unknown>);
 };
 const dueCards = () => cards.filter((c) => isDue(c)).sort((a, b) => a.due - b.due);
 
@@ -220,6 +235,7 @@ function homeView() {
         <span class="stat"><b>🔥 ${stats.streak}</b>일 연속</span>
         <span class="stat"><b>🃏 ${cards.length}</b>장 보유</span>
       </div>
+      ${syncChip()}
       ${nextForm ? `<div class="unlock">Lv.${nextForm.lv}에 <b>${nextForm.item}</b> 해금 → ${nextForm.title}</div>` : '<div class="unlock">최종 형태 도달! 🌏</div>'}
     </div>
   </section>
@@ -369,8 +385,12 @@ function settingsView() {
     ${!ttsSupported() ? '<p class="warn">이 브라우저는 음성 읽기를 지원하지 않아요.</p>' : ''}
   </section>
   <section class="panel">
-    <h3 class="sec">백업</h3>
-    <p class="hint">기기를 바꾸거나 브라우저 데이터를 지우기 전에 백업하세요.</p>
+    <h3 class="sec">내 학습 기록</h3>
+    ${syncChip()}
+    <p class="hint">${sync === 'local'
+      ? '지금은 이 기기 브라우저에만 저장돼요. 브라우저 데이터를 지우면 사라지니 가끔 내보내기로 백업하세요.'
+      : 'claude.ai 계정에 저장돼서 앱을 고치거나 다시 열어도, 다른 기기에서 열어도 기록이 이어져요.'}
+    카드 ${cards.length}장 · 누적 정답 ${stats.totals.correct}회 · 누적 듣기 ${stats.totals.listens}회</p>
     <div class="row"><button class="btn plain" data-action="export">⬇️ 내보내기</button><label class="btn plain" for="import">⬆️ 가져오기</label><input id="import" type="file" accept="application/json" hidden></div>
   </section>
   <section class="panel">
@@ -793,7 +813,7 @@ document.addEventListener('click', async (e) => {
       stopLoop();
       const card: Card = {
         id: uid(), ko: ui.draftKo.trim(), en: ui.draft.en, alts: ui.draft.alts, note: ui.draft.note_ko,
-        words: ui.draft.words, createdAt: Date.now(), ...newCardSchedule(), listens: draftListens,
+        words: ui.draft.words, createdAt: Date.now(), ...newCardSchedule(), listens: draftListens, updatedAt: Date.now(),
       };
       cards = [...cards, card];
       saveCards(cards);
@@ -833,6 +853,7 @@ document.addEventListener('click', async (e) => {
       if (ui.confirmDelete !== id) { ui.confirmDelete = id; return render(); }
       cards = cards.filter((c) => c.id !== id);
       saveCards(cards);
+      addTombstone(id);
       remoteWrite(id, null);
       return go('list', { confirmDelete: '' });
     }
@@ -911,21 +932,25 @@ setInterval(() => { if (ui.view === 'home') render(); }, 60_000);
 
 render();
 
-// 계정 저장소에서 불러오기 (claude.ai 안에서만). 처음이면 이 기기 데이터를 올림
+// 계정 기록과 이 기기 기록을 합치기 (claude.ai 안에서만). 어느 쪽도 버리지 않음
+requestPersistentStorage();
 remoteLoadAll().then((remote) => {
+  loaded = true;
   if (!remote) return;
   const remoteCards = Object.entries(remote).filter(([k]) => !k.startsWith('_')).map(([, v]) => v as Card);
-  if (remoteCards.length || remote._stats) {
-    cards = remoteCards.sort((a, b) => a.createdAt - b.createdAt);
-    if (remote._stats) stats = fixStats({ ...stats, ...(remote._stats as typeof stats) });
-    saveCards(cards);
-    saveStats(stats);
-  } else {
-    cards.forEach((c) => remoteWrite(c.id, c as unknown as Record<string, unknown>));
-    if (stats.xp) putStats();
-  }
+  const { merged, toUpload } = mergeCards(cards, remoteCards, loadTombstones());
+  cards = merged;
+  stats = remote._stats ? mergeStats(stats, remote._stats as Partial<typeof stats>) : stats;
+  saveCards(cards);
+  saveStats(stats);
+  toUpload.forEach((c) => remoteWrite(c.id, c as unknown as Record<string, unknown>));
+  for (const id of loadTombstones()) if (remote[id]) remoteWrite(id, null);
+  putStats();
   render();
 });
+
+// 저장이 끝나기 전에 닫으려 하면 경고
+addEventListener('beforeunload', (e) => { if (hasUnsaved()) e.preventDefault(); });
 
 if ('serviceWorker' in navigator && import.meta.env.PROD && !inArtifact) {
   navigator.serviceWorker.register('./sw.js').catch(() => {});
