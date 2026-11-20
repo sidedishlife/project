@@ -3,7 +3,8 @@ import { sampleCap } from './platform';
 
 // claude.ai 안: 사용자의 Claude 구독으로 호출 (키 불필요)
 // 밖(독립 웹앱): Google Gemini API 무료 사용량으로 호출. 키는 이 휴대폰 브라우저에만 저장되고 구글로만 전송
-const GEMINI_MODELS = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-2.0-flash']; // 앞에서부터 시도
+// 앞에서부터 시도. 붐비거나(503) 하루 무료 한도를 다 쓰면(429, 모델마다 따로) 다음 모델로
+const GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.5-flash-lite', 'gemini-flash-lite-latest', 'gemini-2.0-flash'];
 const GEMINI_URL = (m: string) => `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`;
 
 const WORD_SCHEMA = {
@@ -71,9 +72,12 @@ function parseLoose(text: string): unknown {
 let workingModel = ''; // 한 번 성공한 모델은 계속 사용
 
 async function askGemini<T>(key: string, system: string, user: string, schema: object, maxTokens: number): Promise<T> {
-  const models = workingModel ? [workingModel] : GEMINI_MODELS;
+  // 마지막으로 성공한 모델부터, 안 되면 나머지 모델 순서대로
+  const models = workingModel ? [workingModel, ...GEMINI_MODELS.filter((x) => x !== workingModel)] : GEMINI_MODELS;
   let lastErr: Error | null = null;
+  let busy = 0, quota = 0;
   let useSchema = true; // 형식 지정이 거절되면 지시문으로만 형식을 요청
+  let retried = false; // 붐빌 때 같은 모델로 한 번 더
   for (let mi = 0; mi < models.length; mi++) {
     const m = models[mi];
     let res: Response;
@@ -92,11 +96,17 @@ async function askGemini<T>(key: string, system: string, user: string, schema: o
     }
     const body: any = await res.json().catch(() => ({}));
     if (res.status === 404) { lastErr = new AIError(`모델을 찾을 수 없어요 (${m})`); continue; } // 다음 모델로
+    if (res.status === 503 || res.status === 500) {
+      // 구글 서버가 붐빔: 잠깐 쉬었다 같은 모델로 한 번, 그래도 안 되면 다음 모델
+      if (!retried) { retried = true; await new Promise((r) => setTimeout(r, 1200)); mi--; continue; }
+      retried = false; busy++;
+      continue;
+    }
+    if (res.status === 429) { quota++; retried = false; continue; } // 이 모델의 무료 한도 소진 → 다음 모델
     if (!res.ok) {
       const reason = body?.error?.details?.find?.((d: any) => d.reason)?.reason ?? body?.error?.status ?? '';
       if (res.status === 400 && /API_KEY/.test(reason + JSON.stringify(body))) throw new AIError('Gemini API 키가 올바르지 않아요. 설정에서 확인해 주세요.');
       if (res.status === 403) throw new AIError('이 키로는 Gemini를 쓸 수 없어요. Google AI Studio에서 키를 다시 확인해 주세요.');
-      if (res.status === 429) throw new AIError('오늘 무료 사용량을 다 썼거나 너무 빨리 요청했어요. 잠시 후(또는 내일) 다시 시도해 주세요.');
       if (res.status === 400 && useSchema) { useSchema = false; mi--; continue; } // 같은 모델로 형식 지정 없이 한 번 더
       throw new AIError(`Gemini 오류(${res.status}): ${body?.error?.message ?? '알 수 없는 오류'}`);
     }
@@ -109,6 +119,8 @@ async function askGemini<T>(key: string, system: string, user: string, schema: o
     if (parsed === undefined) throw new AIError(`답을 읽지 못했어요. 한 번 더 눌러 주세요. (받은 답: ${text.slice(0, 80) || '비어 있음'})`);
     return parsed as T;
   }
+  if (quota && !busy) throw new AIError('오늘 무료 사용량을 모두 썼어요. 내일 다시 시도해 주세요. (무료 한도는 매일 오후 4~5시쯤 다시 채워져요)');
+  if (busy || quota) throw new AIError('지금 구글 Gemini 서버가 붐벼요. 1~2분 뒤에 다시 눌러 주세요.');
   throw lastErr ?? new AIError('Gemini에 연결하지 못했어요.');
 }
 
