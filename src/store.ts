@@ -24,10 +24,25 @@ export function loadCards(): Card[] {
 }
 export const saveCards = (cards: Card[]) => write(K.cards, cards);
 
-export const loadStats = (): Stats => read(K.stats, { xp: 0, streak: 0, lastStudyDay: '', bestCombo: 0 });
+const emptyDay = (date = today()) => ({ date, correct: 0, created: 0, loops: 0, claimed: [] as string[] });
+export const loadStats = (): Stats => fixStats(read<Stats>(K.stats, {} as Stats));
+
+/** 예전 버전 데이터나 빠진 항목을 채우고, 날짜가 바뀌면 오늘 기록을 새로 시작 */
+export function fixStats(s: Partial<Stats>): Stats {
+  const day = s.day && s.day.date === today() ? s.day : emptyDay();
+  return {
+    xp: s.xp ?? 0,
+    streak: s.streak ?? 0,
+    lastStudyDay: s.lastStudyDay ?? '',
+    bestCombo: s.bestCombo ?? 0,
+    day: { ...emptyDay(), ...day },
+    totals: { created: 0, correct: 0, listens: 0, perfect: 0, ...(s.totals ?? {}) },
+    badges: s.badges ?? [],
+  };
+}
 export const saveStats = (s: Stats) => write(K.stats, s);
 
-export const loadSettings = (): Settings => read(K.settings, { apiKey: '', rate: 0.9, listenTarget: 20 });
+export const loadSettings = (): Settings => read(K.settings, { apiKey: '', rate: 0.9, listenTarget: 20, sound: true });
 export const saveSettings = (s: Settings) => write(K.settings, s);
 
 export const today = (d = new Date()) =>

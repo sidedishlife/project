@@ -23,15 +23,28 @@ export interface Card {
   lapses: number; // 잊어버린 횟수
 }
 
+/** 오늘 하루 기록 (일일 퀘스트용) */
+export interface DayLog {
+  date: string;
+  correct: number;
+  created: number;
+  loops: number; // 20회 듣기 완주 횟수
+  claimed: string[]; // 보상 받은 퀘스트 id
+}
+
 export interface Stats {
   xp: number;
   streak: number;
   lastStudyDay: string; // YYYY-MM-DD
   bestCombo: number;
+  day: DayLog;
+  totals: { created: number; correct: number; listens: number; perfect: number };
+  badges: string[];
 }
 
 export interface Settings {
   apiKey: string;
   rate: number; // TTS 속도
   listenTarget: number; // 기본 20회
+  sound: boolean; // 효과음
 }
