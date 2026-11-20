@@ -298,6 +298,12 @@ button.quest:active { transform: translateY(2px); }
 .sec .sync { font-family: var(--body); }
 .sound-box { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; background: color-mix(in srgb, var(--go) 10%, var(--panel)); border: 2px solid var(--go); border-radius: 16px; padding: 10px 12px; font-size: 14px; font-weight: 600; }
 .sound-box.bad { background: color-mix(in srgb, var(--amber) 14%, var(--panel)); border-color: var(--amber); }
+.sound-box { display: grid; gap: 8px; }
+.dg { display: grid; gap: 4px; width: 100%; }
+.dg-row { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding: 3px 0; border-bottom: 1px dashed var(--line); }
+.dg-row span { color: var(--muted); flex-shrink: 0; }
+.dg-row b { text-align: right; min-width: 0; overflow-wrap: anywhere; }
+.dg-row.bad b { color: var(--red); }
 .help { margin: 10px 0 0; padding-left: 18px; font-size: 14px; display: grid; gap: 6px; }
 .rec-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
 .rec-grid div { background: var(--panel-2); border-radius: 14px; padding: 10px 4px; text-align: center; }

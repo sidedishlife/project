@@ -179,6 +179,9 @@ export function unlockAudio() {
   } catch { /* 미지원 */ }
 }
 
+/** 효과음 엔진 상태 (점검용) */
+export const audioState = () => (ac ? ac.state : '아직 안 켜짐');
+
 export function sfx(kind: 'tap' | 'good' | 'bad' | 'levelup' | 'quest' | 'combo' | 'bark') {
   if (!soundOn) return;
   try {

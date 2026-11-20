@@ -5,12 +5,12 @@ import { inArtifact, sampleCap, downloadsCap, remoteWrite, remoteLoadAll, onSync
 import { mergeCards, mergeStats } from './sync';
 import { sticker, stickerRaw, STICKERS, GOLD_LEVEL, newlyUnlocked, type StickerName } from './stickers';
 import { schedule, isDue, newCardSchedule, formatDue, STAGE_LABELS, type Grade } from './srs';
-import { speak, stopSpeaking, listenKorean, stopListening, sttSupported, ttsSupported, speechEngine, unlockSpeech } from './speech';
+import { speak, stopSpeaking, listenKorean, stopListening, sttSupported, ttsSupported, unlockSpeech, soundReport } from './speech';
 import {
   loadCards, saveCards, loadStats, saveStats, loadSettings, saveSettings, touchStreak, exportBackup, importBackup, fixStats, loadTombstones, addTombstone, requestPersistentStorage,
 } from './store';
 import {
-  levelOf, xpForLevel, FORMS, formIndex, ballSVG, josa, rarity, QUESTS, BADGES, sfx, setSound, confetti, floatXp, unlockAudio,
+  levelOf, xpForLevel, FORMS, formIndex, ballSVG, josa, rarity, QUESTS, BADGES, sfx, setSound, confetti, floatXp, unlockAudio, audioState,
 } from './game';
 
 // ───────────────────────── 상태 ─────────────────────────
@@ -402,18 +402,31 @@ function detailView() {
 
 // ───────────────────────── 설정 ─────────────────────────
 function soundStatusHTML() {
-  const e = speechEngine();
-  const label = e === 'browser' ? '✅ 휴대폰 기본 영어 음성으로 읽어요' : e === 'claude' ? '✅ Claude 음성으로 읽어요' : '⚠️ 이 화면에서는 영어 음성을 낼 수 없어요';
-  return `<div class="sound-box ${e === 'none' ? 'bad' : ''}"><div>${label}</div>
-    <button class="btn sm go" data-action="sound-test">🔊 소리 테스트</button></div>
-    ${e === 'none' ? soundHelpHTML() : ''}`;
+  const d = soundReport();
+  const ok = d.engine !== 'none' && !(d.fail > 0 && d.ok === 0);
+  const row = (k: string, v: string, bad = false) => `<div class="dg-row ${bad ? 'bad' : ''}"><span>${k}</span><b>${esc(v)}</b></div>`;
+  return `<div class="sound-box ${ok ? '' : 'bad'}">
+    <div class="dg">
+      ${row('기기 · 열린 곳', `${d.device} · ${d.place}`, d.place === '앱 안 화면')}
+      ${row('영어 음성', d.synth ? `${d.enVoices}개 (전체 ${d.voices}개)` : '없음', !d.synth || d.enVoices === 0)}
+      ${row('Claude 음성', d.claude ? '사용 가능' : '이 화면에선 안 됨')}
+      ${row('효과음 엔진', audioState())}
+      ${row('마지막 재생', d.last, d.fail > 0 && d.ok === 0)}
+    </div>
+    <div class="row tight">
+      <button class="btn sm go" data-action="sound-test">🔊 영어 소리 테스트</button>
+      <button class="btn sm plain" data-action="sfx-test">🔔 효과음 테스트</button>
+    </div>
+  </div>
+  ${!ok || d.place === '앱 안 화면' ? soundHelpHTML() : ''}`;
 }
 
 function soundHelpHTML() {
   return `<ul class="help">
-    <li><b>Claude 앱 안에서 열었다면</b> → 링크를 <b>크롬(안드로이드)</b>이나 <b>사파리(아이폰)</b>에서 열어 주세요. 앱 안 화면은 음성 읽기를 막는 경우가 많아요.</li>
-    <li><b>아이폰</b>은 옆면 <b>무음 스위치</b>를 끄고 음량을 올려 주세요.</li>
-    <li>안드로이드는 설정 › 일반 › <b>텍스트 음성 변환</b>에서 영어 음성 데이터를 설치하면 좋아요.</li>
+    <li><b>Claude 앱 안에서 열었다면</b> → 이 링크를 복사해서 <b>크롬(안드로이드)</b>이나 <b>사파리(아이폰)</b>에 붙여 넣어 열어 주세요. 앱 안 화면은 음성 읽기를 막는 경우가 많아요.</li>
+    <li><b>아이폰</b>: 옆면 무음 스위치를 끄고, 음량 버튼을 눌러 미디어 음량을 올려 주세요.</li>
+    <li><b>안드로이드</b>: 설정 › 일반 관리 › 텍스트 음성 변환에서 <b>Google 음성 엔진</b>을 고르고 영어 음성 데이터를 설치해 주세요.</li>
+    <li>그래도 안 되면 이 상자를 캡처해서 보내 주세요. 원인을 바로 찾을 수 있어요.</li>
   </ul>`;
 }
 
@@ -936,8 +949,15 @@ document.addEventListener('click', async (e) => {
     case 'go-list':
       return go('list', { filter: 'all', dex: 'cards' });
     case 'sound-test':
-      sfx('good');
-      speak('Hello! Let\'s play and learn English together.', settings.rate).then(() => { if (ui.view === 'settings') render(); });
+      el.textContent = '🔊 재생 중…';
+      speak('Hello! Let\'s learn English together.', settings.rate).then(() => { if (ui.view === 'settings') render(); });
+      setTimeout(() => { if (ui.view === 'settings') render(); }, 3300);
+      return;
+    case 'sfx-test':
+      setSound(true);
+      sfx('levelup');
+      setSound(settings.sound);
+      setTimeout(() => { if (ui.view === 'settings') render(); }, 300);
       return;
     case 'close-levelup':
       document.querySelector('.levelup')?.remove();
