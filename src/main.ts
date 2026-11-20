@@ -1,8 +1,9 @@
 import './style.css';
 import type { Card, Word } from './types';
 import { generateExpression, lookupWord, friendlyError, type Expression } from './api';
+import { inArtifact, sampleCap, downloadsCap, remoteWrite, remoteLoadAll } from './platform';
 import { schedule, isDue, newCardSchedule, formatDue, STAGE_LABELS, MASTERED_STAGE, type Grade } from './srs';
-import { speak, stopSpeaking, listenKorean, sttSupported, ttsSupported } from './speech';
+import { speak, stopSpeaking, listenKorean, stopListening, sttSupported, ttsSupported } from './speech';
 import {
   loadCards, saveCards, loadStats, saveStats, loadSettings, saveSettings, touchStreak, exportBackup, importBackup,
 } from './store';
@@ -14,6 +15,9 @@ type Mode = 'recall' | 'scramble' | 'listen';
 let cards = loadCards();
 let stats = loadStats();
 let settings = loadSettings();
+let hasClaude = false; // claude.ai 안: 내 Claude 계정으로 호출(API 키 불필요)
+sampleCap.then((s) => { hasClaude = !!s; render(); });
+const aiReady = () => hasClaude || !!settings.apiKey;
 
 const ui = {
   view: 'home' as View,
@@ -24,6 +28,7 @@ const ui = {
   error: '',
   listening: false,
   search: '',
+  confirmDelete: '',
 };
 
 interface Session {
@@ -71,11 +76,16 @@ const getCard = (id: string) => cards.find((c) => c.id === id);
 const updateCard = (c: Card) => {
   cards = cards.map((x) => (x.id === c.id ? c : x));
   saveCards(cards);
+  remoteWrite(c.id, c as unknown as Record<string, unknown>);
+};
+const putStats = () => {
+  saveStats(stats);
+  remoteWrite('_stats', stats as unknown as Record<string, unknown>);
 };
 const dueCards = () => cards.filter((c) => isDue(c)).sort((a, b) => a.due - b.due);
 const addXp = (n: number) => {
   stats = touchStreak({ ...stats, xp: stats.xp + n });
-  saveStats(stats);
+  putStats();
 };
 
 function toast(msg: string) {
@@ -172,10 +182,10 @@ function createView() {
     <p class="muted">하고 싶은 말을 한국어로 쓰거나 말해 보세요.</p>
     <textarea id="ko" rows="3" placeholder="예) 이 도면 검토는 금요일까지 끝낼 수 있을 것 같아요">${esc(ui.draftKo)}</textarea>
     <div class="row">
-      ${sttSupported() ? `<button class="btn ${ui.listening ? 'danger' : 'ghost'}" data-action="mic">${ui.listening ? '🎙️ 듣는 중…' : '🎙️ 말하기'}</button>` : ''}
+      ${sttSupported() ? `<button class="btn ${ui.listening ? 'danger' : 'ghost'}" data-action="mic">${ui.listening ? '■ 그만 듣기' : '🎙️ 말하기'}</button>` : ''}
       <button class="btn primary grow" data-action="generate" ${ui.busy ? 'disabled' : ''}>${ui.busy ? '<span class="spin"></span> 만드는 중…' : '✨ 영어 표현 만들기'}</button>
     </div>
-    ${!settings.apiKey ? `<p class="warn">먼저 <a href="#" data-action="nav" data-view="settings">설정</a>에서 API 키를 입력해 주세요.</p>` : ''}
+    ${!aiReady() ? `<p class="warn">먼저 <a href="#" data-action="nav" data-view="settings">설정</a>에서 API 키를 입력해 주세요.</p>` : ''}
     ${ui.error ? `<p class="warn">${esc(ui.error)}</p>` : ''}
   </section>
   ${d ? draftHTML(d) : ''}`;
@@ -229,7 +239,7 @@ function detailView() {
     ${c.alts.length ? `<div class="alts"><div class="muted small">다른 표현</div>${c.alts.map((a) => `<div class="alt"><span>${esc(a)}</span><button class="icon" data-action="say" data-text="${esc(a)}">🔊</button></div>`).join('')}</div>` : ''}
     ${wordChipsHTML(c)}
     <div class="meta muted small">${stageBadge(c)} 다음 복습 ${formatDue(c)} · 복습 ${c.reviews}회 · 잊음 ${c.lapses}회</div>
-    <div class="row"><button class="btn ghost" data-action="nav" data-view="list">← 목록</button><button class="btn danger" data-action="delete" data-id="${c.id}">삭제</button></div>
+    <div class="row"><button class="btn ghost" data-action="nav" data-view="list">← 목록</button><button class="btn danger" data-action="delete" data-id="${c.id}">${ui.confirmDelete === c.id ? '정말 삭제할까요? 한 번 더 누르기' : '삭제'}</button></div>
   </section>`;
 }
 
@@ -237,8 +247,9 @@ function settingsView() {
   return `
   <section class="card">
     <h2>설정</h2>
+    ${hasClaude ? `<p class="ok-note">✅ claude.ai 계정으로 연결돼 있어 API 키 없이 쓸 수 있어요. 표현은 내 계정에 저장돼요.</p><input id="apikey" type="hidden" value="${esc(settings.apiKey)}">` : `
     <label>Anthropic API 키<input id="apikey" type="password" autocomplete="off" placeholder="sk-ant-..." value="${esc(settings.apiKey)}"></label>
-    <p class="muted small">키는 이 휴대폰 안에만 저장되고 Anthropic 서버로만 전송돼요. 키 발급: console.anthropic.com</p>
+    <p class="muted small">키는 이 휴대폰 안에만 저장되고 Anthropic 서버로만 전송돼요. 키 발급: console.anthropic.com</p>`}
     <label>읽기 속도 <b id="rate-v">${settings.rate.toFixed(2)}x</b><input id="rate" type="range" min="0.5" max="1.2" step="0.05" value="${settings.rate}"></label>
     <label>표현당 목표 듣기 횟수<input id="target" type="number" min="1" max="100" value="${settings.listenTarget}"></label>
     <button class="btn primary" data-action="save-settings">저장</button>
@@ -365,7 +376,7 @@ function grade(g: Grade) {
     const gain = 10 + Math.min(session.combo, 10) * 2;
     session.xp += gain;
     addXp(gain);
-    if (session.combo > stats.bestCombo) { stats.bestCombo = session.combo; saveStats(stats); }
+    if (session.combo > stats.bestCombo) { stats.bestCombo = session.combo; putStats(); }
   } else {
     session.combo = 0;
     const gain = g === 'hard' ? 5 : 2;
@@ -445,7 +456,7 @@ async function showWord(wordKey: string, cardId: string) {
   let w = words.find((x) => norm(x.word) === wordKey || norm(x.lemma) === wordKey);
   openSheet(w ? wordHTML(w) : `<div class="sheet-word">${esc(wordKey)}</div><p class="muted"><span class="spin"></span> 사전 찾는 중…</p>`);
   if (w) return;
-  if (!settings.apiKey) return openSheet(`<div class="sheet-word">${esc(wordKey)}</div><p class="warn">API 키가 필요해요.</p>`);
+  if (!aiReady()) return openSheet(`<div class="sheet-word">${esc(wordKey)}</div><p class="warn">API 키가 필요해요.</p>`);
   try {
     w = await lookupWord(settings.apiKey, wordKey, sentence);
     // 한 번 찾은 단어는 카드에 저장 → 다음엔 즉시, 오프라인에서도 표시
@@ -539,14 +550,15 @@ document.addEventListener('click', async (e) => {
     case 'detail':
       return go('detail', { detailId: el.dataset.id! });
     case 'mic': {
-      if (ui.listening) return;
+      if (ui.listening) { stopListening(); return; }
       ui.listening = true;
-      render();
-      try {
-        const text = await listenKorean((t) => {
+      const pending = listenKorean((t) => {
           const ta = document.getElementById('ko') as HTMLTextAreaElement | null;
           if (ta) ta.value = t;
         });
+      render();
+      try {
+        const text = await pending;
         if (text) ui.draftKo = text;
       } catch (err) {
         ui.error = friendlyError(err);
@@ -557,7 +569,7 @@ document.addEventListener('click', async (e) => {
     case 'generate': {
       const ko = ui.draftKo.trim();
       if (!ko) return toast('한국어 문장을 입력해 주세요');
-      if (!settings.apiKey) return go('settings');
+      if (!aiReady()) return go('settings');
       ui.busy = true;
       ui.error = '';
       render();
@@ -587,6 +599,7 @@ document.addEventListener('click', async (e) => {
       };
       cards = [...cards, card];
       saveCards(cards);
+      remoteWrite(card.id, card as unknown as Record<string, unknown>);
       addXp(10);
       ui.draft = null;
       ui.draftKo = '';
@@ -609,10 +622,12 @@ document.addEventListener('click', async (e) => {
     case 'close-sheet':
       return closeSheet();
     case 'delete': {
-      if (!confirm('이 표현을 삭제할까요?')) return;
-      cards = cards.filter((c) => c.id !== el.dataset.id);
+      const id = el.dataset.id!;
+      if (ui.confirmDelete !== id) { ui.confirmDelete = id; return render(); }
+      cards = cards.filter((c) => c.id !== id);
       saveCards(cards);
-      return go('list');
+      remoteWrite(id, null);
+      return go('list', { confirmDelete: '' });
     }
     case 'save-settings': {
       settings = {
@@ -624,6 +639,11 @@ document.addEventListener('click', async (e) => {
       return toast('저장했어요');
     }
     case 'export': {
+      const dl = await downloadsCap;
+      if (dl) {
+        try { await dl.save({ filename: `english-backup-${new Date().toISOString().slice(0, 10)}.json`, data: exportBackup() }); } catch { /* 사용자가 취소 */ }
+        return;
+      }
       const blob = new Blob([exportBackup()], { type: 'application/json' });
       const link = document.createElement('a');
       link.href = URL.createObjectURL(blob);
@@ -674,6 +694,22 @@ setInterval(() => { if (ui.view === 'home') render(); }, 60_000);
 
 render();
 
-if ('serviceWorker' in navigator && import.meta.env.PROD) {
+// 계정 저장소에서 불러오기 (claude.ai 안에서만). 처음이면 이 기기 데이터를 올림
+remoteLoadAll().then((remote) => {
+  if (!remote) return;
+  const remoteCards = Object.entries(remote).filter(([k]) => !k.startsWith('_')).map(([, v]) => v as Card);
+  if (remoteCards.length || remote._stats) {
+    cards = remoteCards.sort((a, b) => a.createdAt - b.createdAt);
+    if (remote._stats) stats = { ...stats, ...(remote._stats as typeof stats) };
+    saveCards(cards);
+    saveStats(stats);
+  } else {
+    cards.forEach((c) => remoteWrite(c.id, c as unknown as Record<string, unknown>));
+    if (stats.xp) putStats();
+  }
+  render();
+});
+
+if ('serviceWorker' in navigator && import.meta.env.PROD && !inArtifact) {
   navigator.serviceWorker.register('./sw.js').catch(() => {});
 }

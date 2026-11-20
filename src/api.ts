@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { Word } from './types';
+import { sampleCap } from './platform';
 
 const MODEL = 'claude-opus-5-5';
 
@@ -40,7 +41,24 @@ const SYSTEM = `당신은 한국인 직장인을 위한 영어 회화 코치입�
 - alts: 더 캐주얼하거나 더 격식 있는 대안이 의미 있을 때만 최대 2개.
 - words: en에 나온 단어 중 a, the, I, is 같은 아주 기초 단어를 제외한 단어와 숙어(구동사 포함)를 모두 포함합니다.`;
 
+/** claude.ai 안에서는 사용자의 Claude 계정으로(API 키 불필요), 밖에서는 API 키로 호출 */
+export async function aiAvailable(apiKey: string): Promise<boolean> {
+  return !!(await sampleCap) || !!apiKey;
+}
+
 async function askJSON<T>(apiKey: string, system: string, user: string, schema: object, maxTokens: number): Promise<T> {
+  const sample = await sampleCap;
+  if (sample) {
+    try {
+      return (await sample.json(
+        `${system}\n\n${user}\n\n다음 JSON 스키마에 맞는 JSON 하나만 답하세요:\n${JSON.stringify(schema)}`,
+        { modelTier: 'default' },
+      )) as T;
+    } catch (e: any) {
+      throw new Error(SAMPLE_ERRORS[e?.code] ?? e?.message ?? '요청에 실패했어요. 다시 시도해 주세요.');
+    }
+  }
+  if (!apiKey) throw new Error('설정에서 API 키를 입력해 주세요.');
   const res = await client(apiKey).beta.messages.create({
     model: MODEL,
     max_tokens: maxTokens,
@@ -56,6 +74,13 @@ async function askJSON<T>(apiKey: string, system: string, user: string, schema: 
   const text = res.content.map((b) => (b.type === 'text' ? b.text : '')).join('');
   return JSON.parse(text) as T;
 }
+
+const SAMPLE_ERRORS: Record<string, string> = {
+  not_granted: 'Claude 사용 권한이 꺼져 있어요. 페이지 메뉴의 권한에서 켜 주세요.',
+  rate_limited: '요청이 많아요. 잠시 후 다시 시도해 주세요.',
+  invalid_json: '답을 읽지 못했어요. 한 번 더 눌러 주세요.',
+  cancelled: '취소됐어요.',
+};
 
 export interface Expression {
   en: string;

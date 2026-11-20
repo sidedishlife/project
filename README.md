@@ -11,7 +11,11 @@
 - **게임 요소**: 회상(직접 말하기)/단어 배열/듣고 고르기 3가지 모드, 콤보·XP·레벨·연속 학습일
 - 데이터는 기기 브라우저에 저장, JSON 백업/복원
 
-## 실행
+## 바로 쓰기
+claude.ai 아티팩트로 올린 버전은 API 키 없이 내 Claude 계정으로 동작하고, 표현은 계정에 저장됩니다.
+`npm run build:artifact` 로 `artifact/malhae.html` 을 다시 만듭니다.
+
+## 직접 실행
 ```bash
 npm install
 npm run dev      # 같은 Wi‑Fi의 휴대폰에서 표시되는 Network 주소로 접속
