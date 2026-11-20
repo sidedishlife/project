@@ -4,7 +4,7 @@ const html = fs.readFileSync('dist-single/index.html', 'utf8');
 const styles = [...html.matchAll(/<style[^>]*>[\s\S]*?<\/style>/g)].map((m) => m[0]).join('\n');
 const scripts = [...html.matchAll(/<script type="module"[^>]*>[\s\S]*?<\/script>/g)].map((m) => m[0]).join('\n');
 const safe = (s) => s.replace(/\uFFFD/g, '\\uFFFD');
-const out = `<title>말해영어</title>
+const out = `<title>Study</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 ${styles}
 <div id="app"></div>
