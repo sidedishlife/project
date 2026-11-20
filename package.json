@@ -7,7 +7,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview --host",
     "test": "vitest run",
-    "build:artifact": "SINGLE=1 vite build && node scripts/make-artifact.mjs"
+    "build:artifact": "SINGLE=1 vite build && node scripts/make-artifact.mjs",
+    "build:pages": "tsc && vite build --mode pages"
   },
   "repository": {
     "type": "git",

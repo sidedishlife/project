@@ -1,5 +1,5 @@
 // 앱 화면을 캐시해 오프라인에서도 복습/듣기가 가능하게 함 (API 호출은 캐시하지 않음)
-const CACHE = 'malhae-v1';
+const CACHE = 'study-v2';
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['./', './index.html'])));
   self.skipWaiting();

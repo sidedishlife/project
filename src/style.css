@@ -327,6 +327,15 @@ button.quest:active { background: var(--paper-2); }
 .rules summary::after { content: "+"; color: var(--muted); }
 .rules[open] summary::after { content: "–"; }
 
+/* 스티커 넣기 칸 */
+.st-slots { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 10px; }
+.st-slot { display: grid; justify-items: center; gap: 2px; text-align: center; min-width: 0; }
+.st-pick { width: 100%; aspect-ratio: 1; max-width: 100%; border-radius: 16px; background: var(--paper-2); border: 1.5px dashed var(--line); display: grid; place-items: center; cursor: pointer; color: var(--muted); margin: 0; overflow: hidden; }
+.st-slot.filled .st-pick { border-style: solid; background: var(--paper); }
+.st-pick img { width: 100%; height: 100%; object-fit: contain; padding: 4px; }
+.st-slot b { font-size: 12px; } .st-slot small { font-size: 10px; color: var(--muted); line-height: 1.2; }
+.st-slot.busy .st-pick { opacity: .4; }
+
 /* ── 하단 탭 */
 .tabs { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; display: flex; justify-content: center; pointer-events: none;
   padding: 0 max(16px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }

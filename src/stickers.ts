@@ -2,9 +2,35 @@ import { heroSVG } from './game';
 
 // 말티즈 사진 스티커. 원본은 stickers-src/, 변환은 scripts/make-stickers.py
 // 파일이 없으면(예: 저장소에 사진을 올리지 않은 경우) 그림 캐릭터로 대신 보여줌
-const files = import.meta.glob('./stickers/*.webp', { eager: true, query: '?url', import: 'default' }) as Record<string, string>;
-const url = (name: string) => files[`./stickers/${name}.webp`];
-export const hasStickers = () => Object.keys(files).length > 0;
+import { bundled } from './sticker-assets';
+import { loadAll, saveOne, removeOne, cutSticker } from './sticker-store';
+
+// 휴대폰에 저장한 스티커 (이름 → 화면용 주소)
+const local: Record<string, string> = {};
+const url = (name: string) => bundled[`./stickers/${name}.webp`] ?? local[name];
+/** 앱에 사진이 들어 있으면(claude.ai용) 휴대폰에서 넣는 기능은 필요 없음 */
+export const stickersBundled = () => Object.keys(bundled).length > 0;
+export const localSticker = (name: string) => local[name];
+
+export async function loadLocalStickers() {
+  if (stickersBundled()) return;
+  const all = await loadAll();
+  for (const [k, blob] of Object.entries(all)) {
+    if (local[k]) URL.revokeObjectURL(local[k]);
+    local[k] = URL.createObjectURL(blob);
+  }
+}
+export async function setLocalSticker(name: string, file: Blob) {
+  const cut = await cutSticker(file);
+  await saveOne(name, cut);
+  if (local[name]) URL.revokeObjectURL(local[name]);
+  local[name] = URL.createObjectURL(cut);
+}
+export async function clearLocalSticker(name: string) {
+  await removeOne(name);
+  if (local[name]) URL.revokeObjectURL(local[name]);
+  delete local[name];
+}
 
 export type StickerName = 'wink' | 'excited' | 'what' | 'yawn' | 'happy' | 'love' | 'surprised' | 'cool' | 'angry';
 

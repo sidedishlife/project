@@ -4,11 +4,12 @@ import { generateExpression, lookupWord, friendlyError, type Expression } from '
 import { inArtifact, ttsCap, sampleCap, downloadsCap, remoteWrite, remoteLoadAll, onSync, hasUnsaved, type SyncState } from './platform';
 import { mergeCards, mergeStats } from './sync';
 import { icon } from './icons';
+import { stickersBundled, localSticker, loadLocalStickers, setLocalSticker, clearLocalSticker } from './stickers';
 import { sticker, stickerRaw, STICKERS, GOLD_LEVEL, newlyUnlocked, type StickerName } from './stickers';
 import { schedule, isDue, newCardSchedule, formatDue, STAGE_LABELS, type Grade } from './srs';
 import { speak, stopSpeaking, listenKorean, stopListening, sttSupported, ttsSupported, unlockSpeech, soundReport, setVoicePref, claudeVoiceAvailable, englishVoices, setVoiceName } from './speech';
 import {
-  loadCards, saveCards, loadStats, saveStats, loadSettings, saveSettings, touchStreak, exportBackup, importBackup, fixStats, loadTombstones, addTombstone, requestPersistentStorage,
+  loadCards, saveCards, loadStats, saveStats, loadSettings, saveSettings, touchStreak, exportBackup, parseBackup, fixStats, loadTombstones, addTombstone, requestPersistentStorage,
 } from './store';
 import {
   levelOf, xpForLevel, FORMS, formIndex, ballSVG, josa, rarity, QUESTS, BADGES, sfx, setSound, confetti, floatXp,
@@ -21,6 +22,7 @@ type Mode = 'recall' | 'scramble' | 'listen';
 let cards = loadCards();
 let stats = loadStats();
 let settings = loadSettings();
+if (settings.apiKey.startsWith('sk-ant')) settings = { ...settings, apiKey: '' }; // 예전 Claude 키는 쓰지 않음
 setSound(settings.sound);
 setVoicePref(settings.voice ?? 'auto');
 setVoiceName(settings.voiceName ?? '');
@@ -117,6 +119,8 @@ const putStats = () => {
 // 문장은 주소의 # 뒤에만 실리므로 서버로 전송되지 않음
 const LISTEN_URL = 'https://sidedishlife.github.io/project/listen/';
 const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+// 사파리 듣기 페이지로 보내는 건 claude.ai 화면 안의 아이폰에서만 필요 (독립 웹앱에서는 앱 안에서 바로 재생)
+const useListenPage = isIOS && inArtifact;
 const b64url = (text: string) => {
   const bytes = new TextEncoder().encode(text);
   let bin = '';
@@ -214,7 +218,7 @@ function playerHTML(card: Card) {
     <div class="player-info">
       <div class="count"><b id="listen-count">${card.listens}</b><span>/ ${target}회</span>${card.listens >= target ? '<em class="done-chip">완주</em>' : ''}</div>
       <div class="row tight">
-        ${isIOS
+        ${useListenPage
           ? `<button class="btn sm pink" data-action="listen-sheet" data-id="${card.id}">${icon('headphones')} 사파리에서 ${settings.listenTarget}회 듣기</button>`
           : `<button class="btn sm ${looping ? 'red' : 'pink'}" data-action="loop" data-id="${card.id}">${looping ? `${icon('close')} 정지` : `${icon('repeat')} ${left}회 연속`}</button>`}
         <button class="btn sm plain" data-action="slow" data-id="${card.id}">${icon('slow')} 천천히</button>
@@ -277,7 +281,7 @@ function homeView() {
         <span class="pc-count">${due.length}</span>
       </button>` : `
       <div class="rest">${stickerRaw('yawn', 'rest-st')}<span>${next ? `다음 놀이는 <b>${formatDue(next)}</b>에 열려요` : '표현을 만들면 10분 뒤 첫 놀이가 열려요'}</span></div>`}
-    ${isIOS && cards.length ? (() => {
+    ${useListenPage && cards.length ? (() => {
       const list = (due.length ? due : cards.slice(-10).reverse()).slice(0, 15);
       return `<button class="listen-all" data-action="listen-sheet" data-ids="${list.map((c) => c.id).join(',')}">${icon('headphones')}<span><b>사파리에서 모두 듣기</b><small>${due.length ? '놀이 대기' : '최근'} 표현 ${list.length}개 · 각 ${settings.listenTarget}회</small></span>${icon('next')}</button>`;
     })() : ''}
@@ -311,7 +315,7 @@ function createView() {
       ${sttSupported() ? `<button class="btn ${ui.listening ? 'red' : 'plain'}" data-action="mic">${ui.listening ? `${icon('close')} 그만` : `${icon('mic')} 말하기`}</button>` : ''}
       <button class="btn pink grow" data-action="generate" ${ui.busy ? 'disabled' : ''}>${ui.busy ? `<span class="spin"></span> ${esc(pet())}${josa(pet(), '이', '')}가 생각 중…` : `${icon('sparkle')} 영어로 만들기`}</button>
     </div>
-    ${!aiReady() ? `<p class="warn">먼저 <a href="#" data-action="nav" data-view="settings">설정</a>에서 API 키를 입력해 주세요.</p>` : ''}
+    ${!aiReady() ? `<p class="warn">먼저 <a href="#" data-action="nav" data-view="settings">설정</a>에서 Gemini API 키(무료)를 입력해 주세요.</p>` : ''}
     ${ui.error ? `<p class="warn">${esc(ui.error)}</p>` : ''}
   </section>
   ${d ? draftHTML(d) : ''}`;
@@ -434,7 +438,7 @@ function soundStatusHTML() {
       ${row('지금 쓰는 음성', d.engine === 'claude' ? 'Claude 음성' : d.engine === 'browser' ? '휴대폰 음성' : '없음', d.engine === 'none')}
       ${row('기기 · 열린 곳', `${d.device} · ${d.place}`, d.place === '앱 안 화면')}
       ${row('영어 음성', d.synth ? `${d.enVoices}개 (전체 ${d.voices}개)` : '없음', !d.synth || d.enVoices === 0)}
-      ${row('Claude 음성', d.claude ? '사용 가능' : '이 화면에선 안 됨')}
+      ${inArtifact ? row('Claude 음성', d.claude ? '사용 가능' : '이 화면에선 안 됨') : ''}
       ${row('마지막 재생', d.last, d.fail > 0 && d.ok === 0)}
     </div>
     <div class="row tight">
@@ -475,11 +479,11 @@ function settingsView() {
     <h2 class="screen-title">설정</h2>
     <p class="hint">바꾸면 바로 저장돼요.</p>
     <h3 class="sub-h">${icon('volume')}소리</h3>
-    <div class="seg voice-seg" role="radiogroup" aria-label="영어 읽기 음성">
+    ${inArtifact ? `<div class="seg voice-seg" role="radiogroup" aria-label="영어 읽기 음성">
       ${([['auto', '자동'], ['claude', 'Claude 음성'], ['device', '휴대폰 음성']] as const).map(([k, l]) =>
         `<button class="${(settings.voice ?? 'auto') === k ? 'on' : ''}" data-action="voice" data-v="${k}" role="radio" aria-checked="${(settings.voice ?? 'auto') === k}" ${k === 'claude' && !claudeVoiceAvailable() ? 'disabled' : ''}>${l}</button>`).join('')}
     </div>
-    <p class="hint">${claudeVoiceAvailable() ? '자동: Claude 음성을 먼저 쓰고, 안 되면 휴대폰 음성으로 바꿔요.' : '이 화면에서는 Claude 음성을 쓸 수 없어 휴대폰 음성을 써요. (사파리·모바일 앱은 Claude 음성 미지원)'}</p>
+    <p class="hint">${claudeVoiceAvailable() ? '자동: Claude 음성을 먼저 쓰고, 안 되면 휴대폰 음성으로 바꿔요.' : '이 화면에서는 Claude 음성을 쓸 수 없어 휴대폰 음성을 써요. (사파리·모바일 앱은 Claude 음성 미지원)'}</p>` : ''}
     ${soundStatusHTML()}
     <label for="rate">읽기 속도 <b id="rate-v">${settings.rate.toFixed(2)}x</b></label><input id="rate" type="range" min="0.5" max="1.2" step="0.05" value="${settings.rate}">
     <label for="target">표현당 목표 듣기 횟수</label><input id="target" type="number" min="1" max="100" value="${settings.listenTarget}">
@@ -487,9 +491,10 @@ function settingsView() {
     <h3 class="sub-h">${icon('paw')}강아지 이름</h3>
     <input id="petname" type="text" maxlength="10" value="${esc(pet())}" aria-label="강아지 이름">
     ${hasClaude ? '' : `
-    <h3 class="sub-h">${icon('sparkle')}Claude API 키</h3>
-    <input id="apikey" type="password" autocomplete="off" placeholder="sk-ant-..." value="${esc(settings.apiKey)}" aria-label="Anthropic API 키">
-    <p class="hint">키는 이 휴대폰 안에만 저장되고 Anthropic 서버로만 전송돼요.</p>`}
+    <h3 class="sub-h">${icon('sparkle')}Gemini API 키 (무료)</h3>
+    <input id="apikey" type="password" autocomplete="off" placeholder="AIza..." value="${esc(settings.apiKey)}" aria-label="Gemini API 키">
+    <p class="hint"><a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>에서 무료로 발급받아 붙여 넣으세요. 키는 이 휴대폰 안에만 저장되고 구글로만 전송돼요. 회사 기밀이 담긴 문장은 넣지 않는 걸 권해요.</p>
+    ${stickerSettingsHTML()}`}
   </section>
   <section class="panel">
     <h3 class="sec">학습 기록 ${syncChip()}</h3>
@@ -505,6 +510,24 @@ function settingsView() {
     그래서 표현이 잊혀질 때쯤 <b>공</b>이 되어 ${esc(petGa())} 놀자고 해요. 떠올려 맞히면 다음 놀이가 <b>10분 → 1일 → 3일 → 1주 → 2주 → 1달 → 2달</b> 뒤로 늦춰지고, 놓치면 10분 뒤 다시 나와요.
     XP는 듣기보다 <b>직접 떠올려 맞혔을 때</b> 가장 많이 받아요.</p>
   </details>`;
+}
+
+/** 공개 웹앱: 말티즈 스티커 사진을 휴대폰에서 직접 넣는 칸 (사진은 이 휴대폰에만 저장) */
+function stickerSettingsHTML() {
+  if (stickersBundled()) return '';
+  const filled = STICKERS.filter((x) => localSticker(x.name)).length;
+  return `
+    <h3 class="sub-h">${icon('paw')}말티즈 스티커 <span class="reset">${filled}/${STICKERS.length}</span></h3>
+    <p class="hint">흰 배경 스티커 사진을 고르면 배경을 자동으로 지워요. 사진은 이 휴대폰 안에만 저장되고 인터넷에 올라가지 않아요. 비워 두면 그림 캐릭터가 나와요.</p>
+    <div class="st-slots">${STICKERS.map((x) => {
+      const src = localSticker(x.name);
+      return `<div class="st-slot ${src ? 'filled' : ''}">
+        <label class="st-pick" for="st-${x.name}">${src ? `<img src="${src}" alt="${x.label}">` : `${icon('upload')}`}</label>
+        <input id="st-${x.name}" type="file" accept="image/*" hidden data-sticker="${x.name}">
+        <b>${x.label}</b><small>${x.when}</small>
+        ${src ? `<button class="link" data-action="st-clear" data-name="${x.name}">지우기</button>` : ''}
+      </div>`;
+    }).join('')}</div>`;
 }
 
 /** 설정 화면 입력값을 바로 저장 */
@@ -860,6 +883,18 @@ app.addEventListener('input', (e) => {
 app.addEventListener('change', async (e) => {
   const t = e.target as HTMLInputElement;
   if (t.id === 'sound') saveSettingsFromForm();
+  if (t.dataset.sticker && t.files?.[0]) {
+    const name = t.dataset.sticker;
+    const slot = t.closest('.st-slot');
+    slot?.classList.add('busy');
+    try {
+      await setLocalSticker(name, t.files[0]);
+      toast('스티커를 넣었어요');
+    } catch (err) {
+      toast(friendlyError(err));
+    }
+    render();
+  }
   if (t.id === 'voicename') {
     settings = { ...settings, voiceName: (t as unknown as HTMLSelectElement).value };
     saveSettings(settings);
@@ -868,12 +903,15 @@ app.addEventListener('change', async (e) => {
   }
   if (t.id === 'import' && t.files?.[0]) {
     try {
-      importBackup(await t.files[0].text());
-      cards = loadCards();
-      stats = loadStats();
+      // 지금 기록을 지우지 않고 합침: 같은 카드는 더 최근에 바뀐 쪽, XP·배지는 큰 쪽
+      const data = parseBackup(await t.files[0].text());
+      const before = cards.length;
+      cards = mergeCards(cards, data.cards, loadTombstones()).merged;
+      if (data.stats) stats = mergeStats(stats, data.stats);
+      saveCards(cards);
       cards.forEach((c) => remoteWrite(c.id, c as unknown as Record<string, unknown>));
       putStats();
-      toast(`${cards.length}장의 카드를 가져왔어요`);
+      toast(`카드 ${cards.length - before}장을 더했어요 (전체 ${cards.length}장)`);
       render();
     } catch (err) {
       toast(friendlyError(err));
@@ -1025,6 +1063,9 @@ document.addEventListener('click', async (e) => {
       }, 300);
       return;
     }
+    case 'st-clear':
+      await clearLocalSticker(el.dataset.name!);
+      return render();
     case 'go-stickers':
       return go('list', { dex: 'stickers' });
     case 'go-create':
@@ -1112,6 +1153,8 @@ document.addEventListener('click', async (e) => {
       return grade(session!.feedback === 'ok' ? 'good' : 'again');
   }
 });
+
+loadLocalStickers().then(render);
 
 // 첫 터치 때 소리 잠금 해제 (모바일은 탭 안에서 한 번 소리를 깨워야 함)
 document.addEventListener('pointerdown', () => { unlockSpeech(); }, { capture: true });

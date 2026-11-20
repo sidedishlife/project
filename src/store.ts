@@ -61,11 +61,11 @@ export function touchStreak(s: Stats): Stats {
 export function exportBackup(): string {
   return JSON.stringify({ cards: loadCards(), stats: loadStats() }, null, 2);
 }
-export function importBackup(json: string) {
+/** 백업 파일 읽기 (저장은 하지 않음: 지금 기록과 합쳐서 저장하는 건 호출하는 쪽에서) */
+export function parseBackup(json: string): { cards: Card[]; stats?: Partial<Stats> } {
   const data = JSON.parse(json);
-  if (!Array.isArray(data.cards)) throw new Error('올바른 백업 파일이 아닙니다');
-  saveCards(data.cards);
-  if (data.stats) saveStats(data.stats);
+  if (!Array.isArray(data.cards)) throw new Error('올바른 백업 파일이 아니에요');
+  return { cards: data.cards, stats: data.stats };
 }
 
 /** 지운 카드 id 목록: 다른 기기 기록과 합칠 때 되살아나지 않게 */
