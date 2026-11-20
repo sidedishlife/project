@@ -22,7 +22,7 @@ claude.ai 아티팩트로 올린 버전은 API 키 없이 내 Claude 계정으�
 
 ## 강아지 스티커
 `stickers-src/`에 스티커 원본 PNG(흰 배경)를 넣고 `python3 scripts/make-stickers.py`를 실행하면 배경을 지운 작은 webp가 `src/stickers/`에 만들어지고 앱이 자동으로 씁니다.
-파일 이름: wink, excited, what, yawn, happy, love, surprised, cool, angry. 사진은 공개 저장소에 올리지 않도록 git에서 제외돼 있고, 없으면 그림 캐릭터로 대신 보여줍니다.
+파일 이름: wink, excited, what, yawn, happy, love, surprised, cool, angry. 사진이 없으면 앱 설정에서 휴대폰 사진을 직접 넣을 수 있고(`NO_STICKERS=1`로 빌드), 그것도 없으면 그림 캐릭터로 대신 보여줍니다.
 
 ## 직접 실행
 ```bash

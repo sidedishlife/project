@@ -2,8 +2,5 @@ node_modules
 dist
 dist-single
 
-# 강아지 사진 스티커: 공개 저장소에 올리지 않음 (원본/변환본)
-stickers-src/
-src/stickers/
 artifact/
 dist-pages
