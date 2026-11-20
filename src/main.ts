@@ -4,12 +4,12 @@ import { generateExpression, lookupWord, friendlyError, type Expression } from '
 import { inArtifact, sampleCap, downloadsCap, remoteWrite, remoteLoadAll, onSync, hasUnsaved, type SyncState } from './platform';
 import { mergeCards, mergeStats } from './sync';
 import { schedule, isDue, newCardSchedule, formatDue, STAGE_LABELS, type Grade } from './srs';
-import { speak, stopSpeaking, listenKorean, stopListening, sttSupported, ttsSupported } from './speech';
+import { speak, stopSpeaking, listenKorean, stopListening, sttSupported, ttsSupported, speechEngine, unlockSpeech } from './speech';
 import {
   loadCards, saveCards, loadStats, saveStats, loadSettings, saveSettings, touchStreak, exportBackup, importBackup, fixStats, loadTombstones, addTombstone, requestPersistentStorage,
 } from './store';
 import {
-  levelOf, xpForLevel, FORMS, formIndex, heroSVG, ballSVG, josa, rarity, QUESTS, BADGES, sfx, setSound, confetti, floatXp,
+  levelOf, xpForLevel, FORMS, formIndex, heroSVG, ballSVG, josa, rarity, QUESTS, BADGES, sfx, setSound, confetti, floatXp, unlockAudio,
 } from './game';
 
 // ───────────────────────── 상태 ─────────────────────────
@@ -47,6 +47,7 @@ const ui = {
   search: '',
   confirmDelete: '',
   newCardId: '', // 방금 획득한 카드(등장 연출)
+  filter: 'all',
 };
 
 interface Session {
@@ -220,6 +221,9 @@ function xpBarHTML(xp: number) {
 }
 
 // ───────────────────────── 홈 ─────────────────────────
+/** 스티커처럼 말하는 말풍선 */
+const bubble = (text: string, cls = '') => `<span class="say ${cls}">${esc(text)}</span>`;
+
 function homeView() {
   const due = dueCards();
   const lv = levelOf(stats.xp);
@@ -227,31 +231,31 @@ function homeView() {
   const nextForm = FORMS[f + 1];
   const next = cards.filter((c) => !isDue(c)).sort((a, b) => a.due - b.due)[0];
   const rarCount = (k: string) => cards.filter((c) => rarity(c).key === k).length;
+  const mood = due.length ? 'happy' : 'idle';
+  const say = !cards.length ? '안녕! 나랑 영어 놀이하자' : due.length ? '놀자! 놀자!' : '쿨쿨…';
   return `
-  <section class="profile panel">
-    <button class="hero-stage pettable" data-action="pet" aria-label="${esc(pet())} 쓰다듬기">${heroSVG(lv)}</button>
-    <div class="profile-info">
-      <div class="pet-name">${esc(pet())} <button class="link" data-action="rename">이름 바꾸기</button></div>
-      <div class="lv-row"><span class="lv">Lv.${lv}</span><span class="title-chip">${FORMS[f].title}</span></div>
-      ${xpBarHTML(stats.xp)}
-      <div class="mini-stats">
-        <span class="stat"><b>🔥 ${stats.streak}</b>일 연속</span>
-        <span class="stat"><b>🃏 ${cards.length}</b>장 보유</span>
-      </div>
-      ${syncChip()}
-      ${nextForm ? `<div class="unlock">Lv.${nextForm.lv} 달성 시 <b>${nextForm.item}</b> 선물 → ${nextForm.title}</div>` : '<div class="unlock">다 자랐어요! 👑</div>'}
+  <section class="home-hero">
+    <div class="hero-wrap">
+      ${bubble(say, due.length ? 'bounce' : '')}
+      <button class="hero-stage big pettable" data-action="pet" aria-label="${esc(pet())} 쓰다듬기">${heroSVG(lv, mood)}</button>
     </div>
+    <div class="pet-line"><b class="pet-name">${esc(pet())}</b><span class="lv-pill">Lv.${lv}</span><span class="title-chip">${FORMS[f].title}</span></div>
+    ${xpBarHTML(stats.xp)}
+    <div class="chips-row">
+      <span class="pill">🔥 <b>${stats.streak}</b>일 연속</span>
+      <span class="pill">🃏 <b>${cards.length}</b>장</span>
+      ${syncChip()}
+    </div>
+    ${nextForm ? `<p class="unlock">Lv.${nextForm.lv} 달성 시 <b>${nextForm.item}</b> 선물 · ${nextForm.title}</p>` : '<p class="unlock">다 자랐어요! 👑</p>'}
   </section>
 
-  <section class="battle panel ${due.length ? 'alert' : ''}">
+  <section class="panel play-call ${due.length ? 'ready' : ''}">
     ${due.length ? `
-      <div class="battle-head">🎾 ${esc(petGa())} 공 <b>${due.length}</b>개를 물어오고 싶어해요!</div>
-      <p class="sub">공 하나가 표현 하나예요. 지금 놀아주지 않으면 이 표현들을 잊어버려요.</p>
-      <div class="mon-row">${due.slice(0, 6).map(() => `<span class="mon-mini">${ballSVG()}</span>`).join('')}${due.length > 6 ? `<span class="more">+${due.length - 6}</span>` : ''}</div>
-      <button class="btn go xl" data-action="start-review">🎾 놀아주기</button>` : `
-      <div class="battle-head calm">😴 ${esc(petGa())} 낮잠 자는 중</div>
-      <p class="sub">${next ? `다음 놀이 시간: <b>${formatDue(next)}</b>` : '첫 표현을 만들면 10분 뒤 첫 놀이 시간이 와요.'}</p>
-      <button class="btn xl" data-action="nav" data-view="create">✍️ 새 표현 만들기</button>`}
+      <div class="pc-top"><div><div class="pc-title">놀이 시간!</div><p class="sub">공 하나가 표현 하나예요. 지금 놀아주면 잊어버리기 전에 다시 떠올릴 수 있어요.</p></div><div class="pc-count"><b>${due.length}</b><span>개</span></div></div>
+      <div class="mon-row">${due.slice(0, 7).map(() => `<span class="mon-mini">${ballSVG()}</span>`).join('')}${due.length > 7 ? `<span class="more">+${due.length - 7}</span>` : ''}</div>
+      <button class="btn go xl" data-action="start-review">🎾 ${esc(pet())}${josa(pet(), '이', '')}랑 놀아주기</button>` : `
+      <div class="pc-top"><div><div class="pc-title calm">낮잠 시간 😴</div><p class="sub">${next ? `다음 놀이는 <b>${formatDue(next)}</b>에 열려요. 그동안 새 표현을 만들어 볼까요?` : '첫 표현을 만들면 10분 뒤 첫 놀이 시간이 와요.'}</p></div></div>
+      <button class="btn pink xl" data-action="nav" data-view="create">✍️ 새 표현 만들기</button>`}
   </section>
 
   <section class="panel">
@@ -271,31 +275,36 @@ function homeView() {
     <h3 class="sec">표현 도감 <button class="link" data-action="nav" data-view="list">전체 보기 ›</button></h3>
     <div class="rar-grid">
       ${[['common', '일반'], ['uncommon', '고급'], ['rare', '희귀'], ['epic', '영웅'], ['legend', '전설']]
-        .map(([k, l]) => `<div class="rar-cell rar-${k}"><b>${rarCount(k)}</b><span>${l}</span></div>`).join('')}
+        .map(([k, l]) => `<button class="rar-cell rar-${k}" data-action="filter" data-f="${k}"><b>${rarCount(k)}</b><span>${l}</span></button>`).join('')}
     </div>
-    <p class="hint">복습에서 이길 때마다 카드 등급이 올라가요. 전설 = 완전히 내 것이 된 표현.</p>
+    <p class="hint">놀이에서 공을 물어올 때마다 카드 등급이 올라가요. 전설은 완전히 내 것이 된 표현이에요.</p>
   </section>
 
   <section class="panel">
     <h3 class="sec">배지 <span class="reset">${stats.badges.length} / ${BADGES.length}</span></h3>
     <div class="badges">${BADGES.map((b) => {
       const on = stats.badges.includes(b.id);
-      return `<div class="badge-i ${on ? 'on' : ''}" title="${esc(b.desc)}"><span>${on ? b.icon : '🔒'}</span><b>${b.name}</b><small>${b.desc}</small></div>`;
+      return `<div class="badge-i ${on ? 'on' : ''}"><span>${on ? b.icon : '🔒'}</span><b>${b.name}</b><small>${b.desc}</small></div>`;
     }).join('')}</div>
   </section>`;
 }
 
 // ───────────────────────── 만들기 ─────────────────────────
+const EXAMPLES = ['내일 회의 시간을 조금 미뤄도 될까요?', '그 부분은 제가 확인하고 다시 말씀드릴게요', '오늘 점심 같이 먹을래요?', '천천히 다시 말해 주시겠어요?'];
+
 function createView() {
   const d = ui.draft;
   return `
-  <section class="panel">
-    <h2 class="screen-title">표현 제작소</h2>
-    <p class="sub">영어로 하고 싶은 말을 한국어로 쓰거나 말해 보세요.</p>
-    <textarea id="ko" rows="3" placeholder="예) 내일 회의 시간을 조금 미뤄도 될까요?">${esc(ui.draftKo)}</textarea>
+  <section class="panel maker">
+    <div class="maker-head">
+      <div class="peek">${heroSVG(levelOf(stats.xp), ui.busy ? 'happy' : 'idle')}</div>
+      <div><h2 class="screen-title">표현 만들기</h2><p class="sub">영어로 하고 싶은 말을 한국어로 쓰거나 말해 보세요.</p></div>
+    </div>
+    <textarea id="ko" rows="3" placeholder="예) ${EXAMPLES[0]}">${esc(ui.draftKo)}</textarea>
+    ${!ui.draftKo && !d ? `<div class="examples">${EXAMPLES.slice(1).map((e) => `<button class="ex" data-action="example" data-text="${esc(e)}">${esc(e)}</button>`).join('')}</div>` : ''}
     <div class="row">
       ${sttSupported() ? `<button class="btn ${ui.listening ? 'red' : 'plain'}" data-action="mic">${ui.listening ? '■ 그만 듣기' : '🎙️ 말하기'}</button>` : ''}
-      <button class="btn go grow" data-action="generate" ${ui.busy ? 'disabled' : ''}>${ui.busy ? '<span class="spin"></span> 제작 중…' : '✨ 영어 표현 만들기'}</button>
+      <button class="btn pink grow" data-action="generate" ${ui.busy ? 'disabled' : ''}>${ui.busy ? `<span class="spin"></span> ${esc(pet())}${josa(pet(), '이', '')}가 생각 중…` : '✨ 영어로 만들기'}</button>
     </div>
     ${!aiReady() ? `<p class="warn">먼저 <a href="#" data-action="nav" data-view="settings">설정</a>에서 API 키를 입력해 주세요.</p>` : ''}
     ${ui.error ? `<p class="warn">${esc(ui.error)}</p>` : ''}
@@ -340,13 +349,20 @@ function listItem(c: Card) {
 
 function listView() {
   const q = ui.search.trim().toLowerCase();
-  const list = cards.filter((c) => !q || c.en.toLowerCase().includes(q) || c.ko.includes(q)).slice().reverse();
+  const f = ui.filter;
+  const list = cards
+    .filter((c) => !q || c.en.toLowerCase().includes(q) || c.ko.includes(q))
+    .filter((c) => f === 'all' || (f === 'due' ? isDue(c) : rarity(c).key === f))
+    .slice()
+    .reverse();
+  const filters: [string, string][] = [['all', '전체'], ['due', '🎾 놀이 대기'], ['common', '일반'], ['uncommon', '고급'], ['rare', '희귀'], ['epic', '영웅'], ['legend', '전설']];
   return `
   <section class="panel">
     <h2 class="screen-title">표현 도감 <span class="count-chip">${cards.length}장</span></h2>
     <input id="search" type="search" placeholder="검색 (영어/한국어)" value="${esc(ui.search)}">
+    <div class="filters">${filters.map(([k, l]) => `<button class="fchip ${f === k ? 'on' : ''} ${k !== 'all' && k !== 'due' ? `rar-${k}` : ''}" data-action="filter" data-f="${k}">${l}</button>`).join('')}</div>
   </section>
-  <section class="list">${list.length ? list.map(listItem).join('') : '<div class="panel empty">아직 모은 카드가 없어요. 표현 제작소에서 첫 카드를 만들어 보세요.</div>'}</section>`;
+  <section class="list">${list.length ? list.map(listItem).join('') : `<div class="panel empty">${cards.length ? '조건에 맞는 카드가 없어요.' : '아직 모은 카드가 없어요. 첫 표현을 만들어 보세요!'}</div>`}</section>`;
 }
 
 function detailView() {
@@ -365,7 +381,7 @@ function detailView() {
     ${altsHTML(c.alts)}
     ${wordChipsHTML(c)}
     <div class="tcg-stats">
-      <div><b>${formatDue(c)}</b><span>다음 출현</span></div>
+      <div><b>${formatDue(c)}</b><span>다음 놀이</span></div>
       <div><b>${c.reviews}</b><span>놀이</span></div>
       <div><b>${c.lapses}</b><span>놓침</span></div>
     </div>
@@ -374,33 +390,52 @@ function detailView() {
 }
 
 // ───────────────────────── 설정 ─────────────────────────
+function soundStatusHTML() {
+  const e = speechEngine();
+  const label = e === 'browser' ? '✅ 휴대폰 기본 영어 음성으로 읽어요' : e === 'claude' ? '✅ Claude 음성으로 읽어요' : '⚠️ 이 화면에서는 영어 음성을 낼 수 없어요';
+  return `<div class="sound-box ${e === 'none' ? 'bad' : ''}"><div>${label}</div>
+    <button class="btn sm go" data-action="sound-test">🔊 소리 테스트</button></div>
+    ${e === 'none' ? soundHelpHTML() : ''}`;
+}
+
+function soundHelpHTML() {
+  return `<ul class="help">
+    <li><b>Claude 앱 안에서 열었다면</b> → 링크를 <b>크롬(안드로이드)</b>이나 <b>사파리(아이폰)</b>에서 열어 주세요. 앱 안 화면은 음성 읽기를 막는 경우가 많아요.</li>
+    <li><b>아이폰</b>은 옆면 <b>무음 스위치</b>를 끄고 음량을 올려 주세요.</li>
+    <li>안드로이드는 설정 › 일반 › <b>텍스트 음성 변환</b>에서 영어 음성 데이터를 설치하면 좋아요.</li>
+  </ul>`;
+}
+
 function settingsView() {
   return `
   <section class="panel">
     <h2 class="screen-title">설정</h2>
-    ${hasClaude ? `<p class="ok-note">✅ claude.ai 계정으로 연결돼 있어 API 키 없이 쓸 수 있어요. 카드는 내 계정에 저장돼요.</p><input id="apikey" type="hidden" value="${esc(settings.apiKey)}">` : `
-    <label for="apikey">Anthropic API 키</label><input id="apikey" type="password" autocomplete="off" placeholder="sk-ant-..." value="${esc(settings.apiKey)}">
-    <p class="hint">키는 이 휴대폰 안에만 저장되고 Anthropic 서버로만 전송돼요.</p>`}
-    <label for="petname">강아지 이름</label><input id="petname" type="text" maxlength="10" value="${esc(pet())}">
+    <h3 class="sub-h">🔊 소리</h3>
+    ${soundStatusHTML()}
     <label for="rate">읽기 속도 <b id="rate-v">${settings.rate.toFixed(2)}x</b></label><input id="rate" type="range" min="0.5" max="1.2" step="0.05" value="${settings.rate}">
     <label for="target">표현당 목표 듣기 횟수</label><input id="target" type="number" min="1" max="100" value="${settings.listenTarget}">
     <label class="switch"><input id="sound" type="checkbox" ${settings.sound ? 'checked' : ''}> 효과음·진동</label>
-    <button class="btn go" data-action="save-settings">저장</button>
-    ${!ttsSupported() ? '<p class="warn">이 브라우저는 음성 읽기를 지원하지 않아요.</p>' : ''}
+    <h3 class="sub-h">🐶 내 강아지</h3>
+    <label for="petname">이름</label><input id="petname" type="text" maxlength="10" value="${esc(pet())}">
+    <h3 class="sub-h">🤖 Claude 연결</h3>
+    ${hasClaude ? `<p class="ok-note">claude.ai 계정으로 연결돼 있어 API 키 없이 쓸 수 있어요.</p><input id="apikey" type="hidden" value="${esc(settings.apiKey)}">` : `
+    <label for="apikey">Anthropic API 키</label><input id="apikey" type="password" autocomplete="off" placeholder="sk-ant-..." value="${esc(settings.apiKey)}">
+    <p class="hint">키는 이 휴대폰 안에만 저장되고 Anthropic 서버로만 전송돼요.</p>`}
+    <button class="btn pink xl" data-action="save-settings">저장</button>
   </section>
   <section class="panel">
     <h3 class="sec">내 학습 기록</h3>
     ${syncChip()}
+    <div class="rec-grid"><div><b>${cards.length}</b><span>카드</span></div><div><b>${stats.totals.correct}</b><span>누적 정답</span></div><div><b>${stats.totals.listens}</b><span>누적 듣기</span></div></div>
     <p class="hint">${sync === 'local'
       ? '지금은 이 기기 브라우저에만 저장돼요. 브라우저 데이터를 지우면 사라지니 가끔 내보내기로 백업하세요.'
-      : 'claude.ai 계정에 저장돼서 앱을 고치거나 다시 열어도, 다른 기기에서 열어도 기록이 이어져요.'}
-    카드 ${cards.length}장 · 누적 정답 ${stats.totals.correct}회 · 누적 듣기 ${stats.totals.listens}회</p>
+      : 'claude.ai 계정에 저장돼서 앱을 고치거나 다시 열어도, 다른 기기에서 열어도 기록이 이어져요.'}</p>
     <div class="row"><button class="btn plain" data-action="export">⬇️ 내보내기</button><label class="btn plain" for="import">⬆️ 가져오기</label><input id="import" type="file" accept="application/json" hidden></div>
   </section>
   <section class="panel">
-    <h3 class="sec">게임 규칙</h3>
+    <h3 class="sec">놀이 규칙</h3>
     <p class="hint">사람은 배운 지 하루만 지나도 절반 넘게 잊어요(에빙하우스 망각곡선). 잊기 직전에 떠올리면 기억이 훨씬 오래가요.
-    그래서 표현이 잊혀질 때쯤 <b>공</b>이 되어 강아지가 놀자고 해요. 떠올려 맞히면 강아지가 공을 물어오고, 다음 놀이는 <b>10분 → 1일 → 3일 → 1주 → 2주 → 1달 → 2달</b> 뒤로 늦춰져요. 놓치면 곧 다시 던져줘요.
+    그래서 표현이 잊혀질 때쯤 <b>공</b>이 되어 ${esc(petGa())} 놀자고 해요. 떠올려 맞히면 공을 물어오고, 다음 놀이는 <b>10분 → 1일 → 3일 → 1주 → 2주 → 1달 → 2달</b> 뒤로 늦춰져요. 놓치면 10분 뒤 다시 던져줘요.
     XP는 듣기보다 <b>직접 떠올려 맞혔을 때</b> 가장 많이 받아요.</p>
   </section>`;
 }
@@ -449,7 +484,7 @@ function arenaHTML(s: Session) {
   const mood = s.arena === 'hit' ? 'happy' : s.arena === 'laugh' ? 'sad' : 'idle';
   return `
   <div class="arena">
-    <div class="fighter hero-side ${s.arena === 'hit' ? 'jump' : ''}">${heroSVG(levelOf(stats.xp), mood)}</div>
+    <div class="fighter hero-side ${s.arena === 'hit' ? 'jump' : ''}">${s.arena === 'hit' ? bubble('신나!', 'pop') : s.arena === 'laugh' ? bubble('힝…', 'pop') : ''}${heroSVG(levelOf(stats.xp), mood)}</div>
     <div class="vs">${s.combo >= 2 ? `<div class="combo">🔥 ${s.combo} COMBO</div>` : '<span class="dots">· · ·</span>'}</div>
     <div class="fighter mon-side ${s.arena === 'hit' ? 'fetch' : s.arena === 'laugh' ? 'rollaway' : 'float'}">${ballSVG()}</div>
   </div>
@@ -513,8 +548,8 @@ function summaryView() {
   return `
   <section class="panel summary">
     <div class="stars">${[1, 2, 3].map((i) => `<span class="star ${i <= stars ? 'on' : ''}" style="--d:${i * 0.18}s">★</span>`).join('')}</div>
-    <h2 class="screen-title">놀이 끝! ${esc(petGa())} 신났어요</h2>
-    <div class="hero-stage sm">${heroSVG(lv, 'happy')}</div>
+    <h2 class="screen-title">놀이 끝!</h2><p class="sub">${esc(petGa())} 공을 ${s.defeated}개나 물어왔어요</p>
+    <div class="hero-wrap">${bubble('신나!', 'bounce')}<div class="hero-stage big">${heroSVG(lv, 'happy')}</div></div>
     <div class="sum-grid">
       <div><b>${s.defeated}</b><span>물어온 공</span></div>
       <div><b>${acc}%</b><span>정확도</span></div>
@@ -588,7 +623,7 @@ function showLevelUp(from: number, to: number) {
       <div class="lu-rays"></div>
       <div class="lu-tag">LEVEL UP</div>
       <div class="lu-lv"><span>Lv.${from}</span> → <b>Lv.${to}</b></div>
-      <div class="hero-stage lg">${heroSVG(to, 'happy')}</div>
+      <div class="hero-wrap">${bubble('신나!', 'bounce')}<div class="hero-stage big">${heroSVG(to, 'happy')}</div></div>
       <div class="lu-evo">${esc(petGa())} 쑥 자랐어요!${evolved ? ` <b>${f.item}</b> 선물 획득` : ''}</div>
       <div class="title-chip big">${f.title}</div>
       <button class="btn go xl" data-action="close-levelup">계속하기</button>
@@ -717,7 +752,7 @@ function render() {
     `<button class="tab ${ui.view === v || (v === 'list' && ui.view === 'detail') ? 'on' : ''}" data-action="${v === 'review' ? 'start-review' : 'nav'}" data-view="${v}"><span class="t-icon">${icon}</span><span>${label}</span>${v === 'review' && due ? `<em>${due}</em>` : ''}</button>`;
   app.innerHTML = `
     <main class="${ui.view}">${views[ui.view]()}</main>
-    ${ui.view === 'review' ? '' : `<nav class="tabs">${tab('home', '🏠', '홈')}${tab('create', '✍️', '제작')}${tab('review', '🎾', '놀이')}${tab('list', '🃏', '도감')}${tab('settings', '⚙️', '설정')}</nav>`}`;
+    ${ui.view === 'review' ? '' : `<nav class="tabs"><div class="tabs-inner">${tab('home', '🏠', '홈')}${tab('create', '✍️', '만들기')}${tab('review', '🎾', '놀이')}${tab('list', '🃏', '도감')}${tab('settings', '⚙️', '설정')}</div></nav>`}`;
   // 놀이 중에는 문제 사이에 레벨업을 띄우지 않고 결과 화면에서 보여줌
   if (ui.view !== 'review' || !session || session.idx >= session.queue.length) flushLevelUp();
 }
@@ -764,7 +799,7 @@ document.addEventListener('click', async (e) => {
     case 'nav':
       closeSheet();
       sfx('tap');
-      return go(el.dataset.view as View, { newCardId: '', confirmDelete: '' });
+      return go(el.dataset.view as View, { newCardId: '', confirmDelete: '', filter: el.dataset.view === 'list' ? 'all' : ui.filter });
     case 'start-review':
       return startReview();
     case 'detail':
@@ -860,6 +895,16 @@ document.addEventListener('click', async (e) => {
     }
     case 'rename':
       return go('settings');
+    case 'example':
+      ui.draftKo = el.dataset.text!;
+      return render();
+    case 'filter':
+      sfx('tap');
+      return go('list', { filter: el.dataset.f! });
+    case 'sound-test':
+      sfx('good');
+      speak('Hello! Let\'s play and learn English together.', settings.rate).then(() => { if (ui.view === 'settings') render(); });
+      return;
     case 'close-levelup':
       document.querySelector('.levelup')?.remove();
       return;
@@ -942,6 +987,18 @@ document.addEventListener('click', async (e) => {
     case 'next':
       return grade(session!.feedback === 'ok' ? 'good' : 'again');
   }
+});
+
+// 첫 터치 때 소리 잠금 해제 (모바일은 탭 안에서 한 번 소리를 깨워야 함)
+document.addEventListener('pointerdown', () => { unlockSpeech(); unlockAudio(); }, { capture: true });
+document.addEventListener('touchend', () => { unlockSpeech(); unlockAudio(); }, { capture: true, once: true });
+
+// 영어 음성을 낼 수 없으면 한 번 안내
+let soundHelpShown = false;
+window.addEventListener('speech-unavailable', () => {
+  if (soundHelpShown) return;
+  soundHelpShown = true;
+  openSheet(`<div class="sheet-word">🔇 영어 음성이 안 나와요</div><p class="hint">이 화면에서는 휴대폰이 영어 읽기를 막고 있어요. 아래 방법으로 해결할 수 있어요.</p>${soundHelpHTML()}<button class="btn go xl" data-action="close-sheet">알겠어요</button>`);
 });
 
 // 놀이 시간이 되면 홈 갱신

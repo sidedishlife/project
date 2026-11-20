@@ -17,64 +17,92 @@ export function levelOf(xp: number) {
   return lv;
 }
 
-/** 강아지 성장 단계: 레벨에 따라 몸이 자라고 새 아이템이 생긴다 */
+/** 말티즈 성장 단계: 레벨에 따라 몸이 자라고 새 아이템이 생긴다 */
 export const FORMS = [
-  { lv: 1, title: '꼬물이 아기', item: '' },
-  { lv: 3, title: '방울 강아지', item: '방울 목걸이' },
-  { lv: 5, title: '산책왕', item: '반다나' },
+  { lv: 1, title: '꼬물이 아기 말티', item: '' },
+  { lv: 3, title: '리본 말티', item: '핑크 리본' },
+  { lv: 5, title: '산책 요정', item: '하트 목걸이' },
   { lv: 8, title: '공놀이 달인', item: '테니스공' },
-  { lv: 12, title: '똑똑한 멍멍이', item: '안경' },
-  { lv: 16, title: '든든한 단짝', item: '망토' },
-  { lv: 20, title: '전설의 명견', item: '왕관' },
+  { lv: 12, title: '하트 멋쟁이', item: '하트 안경' },
+  { lv: 16, title: '든든한 단짝', item: '꽃망토' },
+  { lv: 20, title: '전설의 말티', item: '왕관' },
 ];
 export const formIndex = (lv: number) => FORMS.reduce((i, f, k) => (lv >= f.lv ? k : i), 0);
 
-// ───────────────────────── 강아지 그림 ─────────────────────────
-/** 앉아 있는 강아지. mood: idle(꼬리 흔들기) | happy | sad */
+/** 복슬복슬한 털: 타원 둘레를 따라 바깥으로 볼록한 물결 */
+function fluff(cx: number, cy: number, rx: number, ry: number, n: number, amp: number, rot = 0) {
+  const pt = (t: number, k: number) => {
+    const x = Math.cos(t) * rx * k;
+    const y = Math.sin(t) * ry * k;
+    const c = Math.cos(rot), s = Math.sin(rot);
+    return `${(cx + x * c - y * s).toFixed(1)} ${(cy + x * s + y * c).toFixed(1)}`;
+  };
+  let d = `M${pt(0, 1)}`;
+  for (let i = 0; i < n; i++) {
+    const t1 = ((i + 0.5) / n) * Math.PI * 2;
+    const t2 = ((i + 1) / n) * Math.PI * 2;
+    d += ` Q${pt(t1, 1 + amp)} ${pt(t2, 1)}`;
+  }
+  return d + 'Z';
+}
+
+const heart = (x: number, y: number, r: number) =>
+  `M${x} ${y + r * 0.9} C${x - r * 1.6} ${y - r * 0.2} ${x - r * 0.9} ${y - r * 1.5} ${x} ${y - r * 0.5} C${x + r * 0.9} ${y - r * 1.5} ${x + r * 1.6} ${y - r * 0.2} ${x} ${y + r * 0.9}Z`;
+
+const sparkle = (x: number, y: number, r: number) =>
+  `M${x} ${y - r} Q${x + r * 0.18} ${y - r * 0.18} ${x + r} ${y} Q${x + r * 0.18} ${y + r * 0.18} ${x} ${y + r} Q${x - r * 0.18} ${y + r * 0.18} ${x - r} ${y} Q${x - r * 0.18} ${y - r * 0.18} ${x} ${y - r}Z`;
+
+// ───────────────────────── 말티즈 그림 ─────────────────────────
+/** 앉아 있는 말티즈. mood: idle(꼬리 흔들기) | happy(혀 내밀고 반짝) | sad */
 export function heroSVG(lv: number, mood: 'idle' | 'happy' | 'sad' = 'idle') {
   const f = formIndex(lv);
-  const k = 'stroke="var(--ink)" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round"';
-  const eyes =
-    mood === 'happy'
-      ? `<path d="M43 52 q5 -6 10 0 M69 52 q5 -6 10 0" ${k} fill="none"/>`
-      : mood === 'sad'
-        ? `<path d="M42 45 l9 3 M80 45 l-9 3" ${k}/><ellipse cx="48" cy="54" rx="4" ry="4.6" fill="var(--ink)"/><ellipse cx="74" cy="54" rx="4" ry="4.6" fill="var(--ink)"/>`
-        : `<g class="eyes"><ellipse cx="48" cy="52" rx="4.6" ry="5.4" fill="var(--ink)"/><ellipse cx="74" cy="52" rx="4.6" ry="5.4" fill="var(--ink)"/><circle cx="49.6" cy="50" r="1.6" fill="#fff"/><circle cx="75.6" cy="50" r="1.6" fill="#fff"/></g>`;
-  const mouth =
+  const k = 'stroke="var(--ink)" stroke-width="2.6" stroke-linejoin="round" stroke-linecap="round"';
+  const eye = (x: number) =>
     mood === 'sad'
-      ? `<path d="M61 66 v3 M54 73 q7 -5 14 0" ${k} fill="none"/>`
-      : `<path d="M61 65 v4 M61 69 q-5 4 -9 0 M61 69 q5 4 9 0" ${k} fill="none"/>${mood === 'happy' ? `<path d="M57 71 q4 9 8 0z" fill="#ff7b8a" ${k}/>` : ''}`;
-  const cape = f >= 5 ? `<path d="M38 78 q-12 30 -4 38 h54 q8 -8 -4 -38z" fill="var(--blue)" ${k}/>` : '';
-  const neck =
-    f >= 2
-      ? `<path d="M44 79 h34 l-17 15z" fill="var(--signal)" ${k}/><circle cx="56" cy="83" r="1.6" fill="#fff"/><circle cx="66" cy="83" r="1.6" fill="#fff"/><circle cx="61" cy="88" r="1.6" fill="#fff"/>`
-      : f >= 1
-        ? `<path d="M43 79 q18 8 36 0" stroke="var(--red)" stroke-width="5" fill="none" stroke-linecap="round"/><circle cx="61" cy="86" r="4.5" fill="var(--safety)" ${k}/>`
-        : '';
-  const ball = f >= 3 ? `<g><circle cx="92" cy="108" r="8" fill="#d8f35a" ${k}/><path d="M85 104 q7 4 14 0 M85 112 q7 -4 14 0" stroke="#fff" stroke-width="2" fill="none"/></g>` : '';
-  const glasses = f >= 4 ? `<g fill="none" ${k}><circle cx="48" cy="52" r="9"/><circle cx="74" cy="52" r="9"/><path d="M57 52 h8"/></g>` : '';
-  const crown = f >= 6 ? `<path d="M46 31 l3 -14 8 9 4 -12 4 12 8 -9 3 14z" fill="url(#gold)" ${k}/>` : '';
-  const scale = [0.72, 0.8, 0.86, 0.91, 0.95, 0.98, 1][f];
-  return `<svg class="hero-svg mood-${mood}" viewBox="0 0 122 122" aria-hidden="true">
-    <defs><linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffe680"/><stop offset=".5" stop-color="#ffbf1a"/><stop offset="1" stop-color="#e08a00"/></linearGradient></defs>
-    <ellipse cx="61" cy="117" rx="34" ry="4.5" fill="var(--shadow-ink)"/>
-    <g transform="translate(61 117) scale(${scale}) translate(-61 -117)">
+      ? `<ellipse cx="${x}" cy="66" rx="6.2" ry="5.6" fill="var(--ink)"/><path d="M${x - 7} 62 h14" stroke="var(--fur)" stroke-width="4.5"/><circle cx="${x + 2}" cy="66.5" r="1.6" fill="#fff"/>`
+      : `<ellipse cx="${x}" cy="64" rx="7" ry="7.4" fill="var(--ink)"/><circle cx="${x + 2.4}" cy="61.2" r="2.4" fill="#fff"/><circle cx="${x - 2.4}" cy="67" r="1.1" fill="#fff"/>`;
+  const brows = mood === 'sad' ? `<path d="M50 55 l8 3 M90 55 l-8 3" ${k}/>` : '';
+  const mouth =
+    mood === 'happy'
+      ? `<path d="M62 80 q8 9 16 0 z" fill="#5a2a35" ${k}/><path d="M65 83 q5 9 10 0 q-5 -3 -10 0z" fill="var(--tongue)"/>`
+      : mood === 'sad'
+        ? `<path d="M64 85 q6 -4 12 0" ${k} fill="none"/>`
+        : `<path d="M70 79 v2.5 M70 81.5 q-4 3.5 -7.5 0 M70 81.5 q4 3.5 7.5 0" ${k} fill="none"/>`;
+  const cape = f >= 5 ? `<path d="${fluff(70, 112, 36, 18, 14, 0.12)}" fill="var(--cape)" ${k}/>${[52, 66, 82, 94].map((x, i) => `<circle cx="${x}" cy="${118 + (i % 2) * 6}" r="3" fill="#fff" opacity=".8"/>`).join('')}` : '';
+  const necklace = f >= 2 ? `<path d="M56 95 q14 7 28 0" stroke="var(--pink-d)" stroke-width="2.4" fill="none"/><path d="${heart(70, 100, 5)}" fill="var(--pink)" ${k}/>` : '';
+  const ball = f >= 3 ? `<g><circle cx="116" cy="124" r="9" fill="#d8f35a" ${k}/><path d="M108 120 q8 5 16 0 M108 128 q8 -5 16 0" stroke="#fff" stroke-width="2" fill="none"/></g>` : '';
+  const glasses = f >= 4 ? `<g><path d="${heart(56, 65, 9)}" fill="var(--pink)" fill-opacity=".35" ${k}/><path d="${heart(84, 65, 9)}" fill="var(--pink)" fill-opacity=".35" ${k}/><path d="M64 63 q6 -3 12 0" ${k} fill="none"/></g>` : '';
+  const bow =
+    f >= 1
+      ? `<g class="bow"><path d="M70 30 C58 28 44 20 44 8 C54 6 66 16 70 30Z" fill="url(#stripe)" ${k}/><path d="M70 30 C80 18 92 2 106 4 C106 18 88 28 70 30Z" fill="url(#stripe)" ${k}/><circle cx="70" cy="30" r="5.5" fill="var(--pink)" ${k}/><path d="M63 36 q7 4 14 0" stroke="var(--pink-d)" stroke-width="4" stroke-linecap="round"/></g>`
+      : `<path d="M66 36 q4 -6 8 0" stroke="var(--pink-d)" stroke-width="3.5" stroke-linecap="round" fill="none"/>`;
+  const earTies = f >= 2 ? `<rect x="34" y="56" width="8" height="5" rx="2.5" fill="var(--pink)" ${k} stroke-width="1.6"/><rect x="98" y="56" width="8" height="5" rx="2.5" fill="var(--pink)" ${k} stroke-width="1.6"/>` : '';
+  const crown = f >= 6 ? `<path d="M56 24 l2 -12 7 7 5 -11 5 11 7 -7 2 12z" fill="url(#gold)" ${k}/>` : '';
+  const sparkles = mood === 'happy' ? `<g class="sparkles"><path d="${sparkle(18, 30, 8)}" fill="var(--sparkle)" ${k} stroke-width="2"/><path d="${sparkle(30, 16, 5)}" fill="var(--sparkle)" ${k} stroke-width="2"/><path d="${sparkle(122, 40, 6)}" fill="var(--sparkle)" ${k} stroke-width="2"/></g>` : '';
+  const scale = [0.74, 0.8, 0.86, 0.9, 0.94, 0.97, 1][f];
+  return `<svg class="hero-svg mood-${mood}" viewBox="0 0 140 140" aria-hidden="true">
+    <defs>
+      <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffe680"/><stop offset=".5" stop-color="#ffbf1a"/><stop offset="1" stop-color="#e08a00"/></linearGradient>
+      <pattern id="stripe" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(35)"><rect width="5" height="5" fill="var(--pink)"/><rect width="2" height="5" fill="#fff" opacity=".75"/></pattern>
+    </defs>
+    <ellipse cx="70" cy="134" rx="38" ry="4.5" fill="var(--shadow-ink)"/>
+    <g transform="translate(70 134) scale(${scale}) translate(-70 -134)">
       ${cape}
-      <path class="tail" d="M84 100 q20 -4 18 -26" stroke="var(--ink)" stroke-width="10" fill="none" stroke-linecap="round"/>
-      <path class="tail" d="M84 100 q20 -4 18 -26" stroke="var(--fur)" stroke-width="4.5" fill="none" stroke-linecap="round"/>
-      <ellipse cx="61" cy="96" rx="27" ry="21" fill="var(--fur)" ${k}/>
-      <ellipse cx="61" cy="100" rx="14" ry="13" fill="var(--fur-2)"/>
-      <ellipse cx="49" cy="113" rx="8" ry="5" fill="var(--fur-2)" ${k}/><ellipse cx="73" cy="113" rx="8" ry="5" fill="var(--fur-2)" ${k}/>
-      ${neck}
-      <ellipse cx="61" cy="54" rx="31" ry="27" fill="var(--fur)" ${k}/>
-      <path d="M33 38 q-16 4 -13 30 q10 5 17 -9z" fill="var(--ear)" ${k}/>
-      <path d="M89 38 q16 4 13 30 q-10 5 -17 -9z" fill="var(--ear)" ${k}/>
-      <ellipse cx="61" cy="67" rx="14" ry="10" fill="var(--fur-2)"/>
-      <ellipse cx="39" cy="64" rx="5.5" ry="3.5" fill="var(--blush)"/><ellipse cx="83" cy="64" rx="5.5" ry="3.5" fill="var(--blush)"/>
-      ${eyes}${glasses}
-      <ellipse cx="61" cy="62" rx="5.5" ry="4" fill="var(--ink)"/>
-      ${mouth}${crown}
-    </g>${ball}
+      <path class="tail" d="${fluff(104, 104, 13, 9, 9, 0.22, -0.9)}" fill="var(--fur)" ${k}/>
+      <path d="${fluff(70, 110, 30, 21, 14, 0.1)}" fill="var(--fur)" ${k}/>
+      <path d="${fluff(58, 128, 9, 6, 7, 0.14)}" fill="var(--fur)" ${k}/><path d="${fluff(82, 128, 9, 6, 7, 0.14)}" fill="var(--fur)" ${k}/>
+      ${necklace}
+      <path d="${fluff(70, 62, 35, 31, 18, 0.08)}" fill="var(--fur)" ${k}/>
+      <path d="${fluff(70, 40, 12, 9, 9, 0.18)}" fill="var(--fur)" ${k}/>
+      <path class="ear" d="${fluff(38, 80, 13, 26, 11, 0.16, 0.12)}" fill="var(--fur)" ${k}/>
+      <path class="ear" d="${fluff(102, 80, 13, 26, 11, 0.16, -0.12)}" fill="var(--fur)" ${k}/>
+      ${earTies}
+      <ellipse cx="70" cy="77" rx="13" ry="9" fill="var(--fur-2)"/>
+      <ellipse cx="47" cy="76" rx="5" ry="3.2" fill="var(--blush)"/><ellipse cx="93" cy="76" rx="5" ry="3.2" fill="var(--blush)"/>
+      <g class="eyes">${eye(56)}${eye(84)}</g>${brows}${glasses}
+      <ellipse cx="70" cy="74" rx="6" ry="4.6" fill="var(--ink)"/><ellipse cx="68" cy="72.6" rx="2" ry="1.2" fill="#fff" opacity=".7"/>
+      ${mouth}${bow}${crown}
+    </g>${ball}${sparkles}
   </svg>`;
 }
 
@@ -136,6 +164,19 @@ function tone(freq: number, start: number, dur: number, type: OscillatorType = '
   o.connect(g).connect(ac.destination);
   o.start(ac.currentTime + start);
   o.stop(ac.currentTime + start + dur + 0.02);
+}
+
+/** 첫 터치 때 호출: 모바일은 탭 안에서 오디오를 깨워야 소리가 남 */
+export function unlockAudio() {
+  try {
+    ac ??= new AudioContext();
+    if (ac.state === 'suspended') void ac.resume();
+    const b = ac.createBuffer(1, 1, 22050);
+    const src = ac.createBufferSource();
+    src.buffer = b;
+    src.connect(ac.destination);
+    src.start(0);
+  } catch { /* 미지원 */ }
 }
 
 export function sfx(kind: 'tap' | 'good' | 'bad' | 'levelup' | 'quest' | 'combo' | 'bark') {
