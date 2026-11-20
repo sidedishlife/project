@@ -1,12 +1,12 @@
 import './style.css';
 import type { Card, Word } from './types';
 import { generateExpression, lookupWord, friendlyError, type Expression } from './api';
-import { inArtifact, sampleCap, downloadsCap, remoteWrite, remoteLoadAll, onSync, hasUnsaved, type SyncState } from './platform';
+import { inArtifact, ttsCap, sampleCap, downloadsCap, remoteWrite, remoteLoadAll, onSync, hasUnsaved, type SyncState } from './platform';
 import { mergeCards, mergeStats } from './sync';
 import { icon } from './icons';
 import { sticker, stickerRaw, STICKERS, GOLD_LEVEL, newlyUnlocked, type StickerName } from './stickers';
 import { schedule, isDue, newCardSchedule, formatDue, STAGE_LABELS, type Grade } from './srs';
-import { speak, stopSpeaking, listenKorean, stopListening, sttSupported, ttsSupported, unlockSpeech, soundReport } from './speech';
+import { speak, stopSpeaking, listenKorean, stopListening, sttSupported, ttsSupported, unlockSpeech, soundReport, setVoicePref, claudeVoiceAvailable } from './speech';
 import {
   loadCards, saveCards, loadStats, saveStats, loadSettings, saveSettings, touchStreak, exportBackup, importBackup, fixStats, loadTombstones, addTombstone, requestPersistentStorage,
 } from './store';
@@ -22,6 +22,7 @@ let cards = loadCards();
 let stats = loadStats();
 let settings = loadSettings();
 setSound(settings.sound);
+setVoicePref(settings.voice ?? 'auto');
 let sync: SyncState = 'local';
 let loaded = false; // 계정 기록 불러오기 끝났는지
 onSync((st) => { sync = st; const el = document.getElementById('sync'); if (el) el.outerHTML = syncChip(); });
@@ -36,6 +37,7 @@ function syncChip() {
 }
 let hasClaude = false; // claude.ai 안: 내 Claude 계정으로 호출(API 키 불필요)
 sampleCap.then((s) => { hasClaude = !!s; render(); });
+ttsCap.then(() => { if (ui.view === 'settings') render(); });
 const aiReady = () => hasClaude || !!settings.apiKey;
 
 const ui = {
@@ -409,6 +411,7 @@ function soundStatusHTML() {
   const row = (k: string, v: string, bad = false) => `<div class="dg-row ${bad ? 'bad' : ''}"><span>${k}</span><b>${esc(v)}</b></div>`;
   return `<div class="sound-box ${ok ? '' : 'bad'}">
     <div class="dg">
+      ${row('지금 쓰는 음성', d.engine === 'claude' ? 'Claude 음성' : d.engine === 'browser' ? '휴대폰 음성' : '없음', d.engine === 'none')}
       ${row('기기 · 열린 곳', `${d.device} · ${d.place}`, d.place === '앱 안 화면')}
       ${row('영어 음성', d.synth ? `${d.enVoices}개 (전체 ${d.voices}개)` : '없음', !d.synth || d.enVoices === 0)}
       ${row('Claude 음성', d.claude ? '사용 가능' : '이 화면에선 안 됨')}
@@ -439,6 +442,11 @@ function settingsView() {
     <h2 class="screen-title">설정</h2>
     <p class="hint">바꾸면 바로 저장돼요.</p>
     <h3 class="sub-h">${icon('volume')}소리</h3>
+    <div class="seg voice-seg" role="radiogroup" aria-label="영어 읽기 음성">
+      ${([['auto', '자동'], ['claude', 'Claude 음성'], ['device', '휴대폰 음성']] as const).map(([k, l]) =>
+        `<button class="${(settings.voice ?? 'auto') === k ? 'on' : ''}" data-action="voice" data-v="${k}" role="radio" aria-checked="${(settings.voice ?? 'auto') === k}" ${k === 'claude' && !claudeVoiceAvailable() ? 'disabled' : ''}>${l}</button>`).join('')}
+    </div>
+    <p class="hint">${claudeVoiceAvailable() ? '자동: Claude 음성을 먼저 쓰고, 안 되면 휴대폰 음성으로 바꿔요.' : '이 화면에서는 Claude 음성을 쓸 수 없어 휴대폰 음성을 써요. (사파리·모바일 앱은 Claude 음성 미지원)'}</p>
     ${soundStatusHTML()}
     <label for="rate">읽기 속도 <b id="rate-v">${settings.rate.toFixed(2)}x</b></label><input id="rate" type="range" min="0.5" max="1.2" step="0.05" value="${settings.rate}">
     <label for="target">표현당 목표 듣기 횟수</label><input id="target" type="number" min="1" max="100" value="${settings.listenTarget}">
@@ -474,6 +482,7 @@ function saveSettingsFromForm() {
     rate: Number(val('rate')?.value ?? settings.rate),
     listenTarget: Math.max(1, Math.min(100, Number(val('target')?.value) || 20)),
     sound: val('sound')?.checked ?? settings.sound,
+    voice: settings.voice ?? 'auto',
   };
   setSound(settings.sound);
   saveSettings(settings);
@@ -957,6 +966,13 @@ document.addEventListener('click', async (e) => {
       speak('Hello! Let\'s learn English together.', settings.rate).then(() => { if (ui.view === 'settings') render(); });
       setTimeout(() => { if (ui.view === 'settings') render(); }, 3300);
       return;
+    case 'voice': {
+      settings = { ...settings, voice: el.dataset.v as 'auto' | 'claude' | 'device' };
+      saveSettings(settings);
+      setVoicePref(settings.voice!);
+      sfx('tap');
+      return render();
+    }
     case 'sfx-test':
       setSound(true);
       sfx('levelup');

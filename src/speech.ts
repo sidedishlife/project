@@ -1,8 +1,8 @@
 import { ttsCap, dictationCap } from './platform';
 
 // ───────────────────────── 음성 출력(TTS) ─────────────────────────
-// 1순위: 브라우저 내장 음성(무료, 속도 조절)  2순위: claude.ai의 Claude 음성
-// 둘 다 안 되면 'speech-unavailable' 이벤트로 화면에 안내
+// '자동'이면: claude.ai의 Claude 음성(이 화면 전용으로 만들어진 소리)이 있으면 그것부터,
+// 없으면(사파리·모바일 앱) 휴대폰 내장 음성. 둘 다 안 되면 'speech-unavailable' 이벤트로 화면에 안내
 let voice: SpeechSynthesisVoice | null = null;
 let tts: any = null;
 ttsCap.then((t) => (tts = t));
@@ -39,16 +39,24 @@ if (hasSynth()) {
 }
 
 export type Engine = 'browser' | 'claude' | 'none';
-/** 지금 쓸 엔진: 브라우저 음성이 2번 연속 실패하면 Claude 음성으로 (있을 때만) */
+export type VoicePref = 'auto' | 'claude' | 'device';
+let pref: VoicePref = 'auto';
+export const setVoicePref = (p: VoicePref) => { pref = p; failStreak = 0; };
+export const claudeVoiceAvailable = () => !!tts;
+
+/** 지금 쓸 엔진 */
 export function speechEngine(): Engine {
-  if (hasSynth() && !(failStreak >= 2 && tts)) return 'browser';
-  if (tts) return 'claude';
+  const device = hasSynth() && failStreak < 2;
+  if (pref === 'device') return hasSynth() ? 'browser' : tts ? 'claude' : 'none';
+  if (tts) return 'claude'; // 자동·Claude: Claude 음성이 있으면 우선
+  if (device || hasSynth()) return 'browser';
   return 'none';
 }
 export const ttsSupported = () => speechEngine() !== 'none';
 
 /** 첫 터치 때: 모바일은 사용자가 누른 순간 안에서 음성 엔진을 한 번 깨워야 이후 재생을 허용함 */
 let unlocked = false;
+let unlockUtterance: SpeechSynthesisUtterance | null = null;
 export function unlockSpeech() {
   if (unlocked || !hasSynth()) return;
   unlocked = true;
@@ -56,6 +64,8 @@ export function unlockSpeech() {
     const u = new SpeechSynthesisUtterance(' ');
     u.volume = 0.01;
     u.lang = 'en-US';
+    unlockUtterance = u;
+    u.onend = u.onerror = () => { if (unlockUtterance === u) unlockUtterance = null; };
     speechSynthesis.speak(u);
     pickVoice();
   } catch { /* 무시 */ }
@@ -69,7 +79,13 @@ function speakWithClaude(text: string, rate: number): Promise<void> {
   return tts
     .speak(text, { rate: Math.max(0.7, Math.min(1.5, rate)), language: 'en' })
     .then(() => { diag.last = 'Claude 음성으로 재생 성공'; diag.okCount++; })
-    .catch((e: any) => { diag.last = `Claude 음성 실패: ${e?.code ?? e}`; diag.failCount++; });
+    .catch((e: any) => {
+      const code = e?.code ?? String(e);
+      diag.last = `Claude 음성 실패: ${code}`;
+      diag.failCount++;
+      // 사용자가 멈춘 게 아니면 휴대폰 음성으로 한 번 더
+      if (code !== 'viewer_stopped' && code !== 'cancelled' && hasSynth()) return speakWithDevice(text, rate);
+    });
 }
 
 export function speak(text: string, rate = 0.9): Promise<void> {
@@ -81,6 +97,10 @@ export function speak(text: string, rate = 0.9): Promise<void> {
     notifyUnavailable();
     return new Promise((r) => setTimeout(r, 600));
   }
+  return speakWithDevice(text, rate);
+}
+
+function speakWithDevice(text: string, rate: number): Promise<void> {
   return new Promise((resolve) => {
     let started = false;
     let finished = false;
@@ -89,16 +109,15 @@ export function speak(text: string, rate = 0.9): Promise<void> {
       diag.last = why;
       diag.failCount++;
       failStreak++;
-      if (tts) speakWithClaude(text, rate).then(done);
+      if (tts && pref !== 'device') speakWithClaude(text, rate).then(done);
       else { notifyUnavailable(); done(); }
     };
     // 일부 모바일 브라우저는 끝났다는 신호를 안 보내므로 안전장치
     const guard = setTimeout(done, 3000 + (text.length * 110) / rate);
     // 3초 안에 소리가 시작되지 않으면 이번 재생은 실패로 봄 (다음엔 다시 시도)
     const startCheck = setTimeout(() => { if (!started) fail('3초 안에 소리가 시작되지 않음'); }, 3000);
+    const start = () => {
     try {
-      // 재생 중일 때만 멈춤: 멈춘 직후 바로 재생하면 소리가 씹히는 브라우저가 있음
-      if (speechSynthesis.speaking || speechSynthesis.pending) speechSynthesis.cancel();
       if (speechSynthesis.paused) speechSynthesis.resume();
       const u = new SpeechSynthesisUtterance(text);
       current = u;
@@ -124,6 +143,12 @@ export function speak(text: string, rate = 0.9): Promise<void> {
       clearTimeout(startCheck);
       fail(`브라우저 음성 오류: ${e}`);
     }
+    };
+    // 다른 문장이 나오는 중이면 멈추고 잠깐 뒤에 시작 (멈춘 즉시 재생하면 소리가 씹히는 브라우저가 있음)
+    // 첫 터치 때 깨우려고 낸 무음 소리는 멈추지 않고 뒤에 이어서 재생
+    const busy = (speechSynthesis.speaking || speechSynthesis.pending) && !unlockUtterance;
+    if (busy) { speechSynthesis.cancel(); setTimeout(start, 120); }
+    else start();
   });
 }
 

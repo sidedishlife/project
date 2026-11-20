@@ -49,4 +49,5 @@ export interface Settings {
   rate: number; // TTS 속도
   listenTarget: number; // 기본 20회
   sound: boolean; // 효과음
+  voice?: 'auto' | 'claude' | 'device'; // 영어 읽기 음성
 }
