@@ -1,0 +1,30 @@
+{
+  "name": "malhae-english",
+  "version": "1.0.0",
+  "description": "한국어로 말하면 영어 표현을 만들어 주고, 망각곡선 복습 게임으로 외우는 모바일 앱(PWA)",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc && vite build",
+    "preview": "vite preview --host",
+    "test": "vitest run"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sidedishlife/project.git"
+  },
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/sidedishlife/project/issues"
+  },
+  "homepage": "https://github.com/sidedishlife/project#readme",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.12.0"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.1"
+  },
+  "private": true,
+  "type": "module"
+}
