@@ -85,10 +85,22 @@
   const $ = (id) => document.getElementById(id);
 
   // 주소 형식: #n=20&r=0.9&s=영어|한국어&s=영어|한국어 ...  (문장은 encodeURIComponent)
+  // 새 형식: #d=<base64url(JSON {n, r, s:[[영어, 한국어], ...]})>  (영문자·숫자만이라 링크가 중간에 깨지지 않음)
+  // 옛 형식: #n=20&r=0.9&s=영어|한국어
   const params = new URLSearchParams(location.hash.slice(1));
-  const items = params.getAll('s').map((v) => { const [en, ko = ''] = v.split('|'); return { en, ko }; }).filter((x) => x.en);
-  const target = Math.max(1, Math.min(100, Number(params.get('n')) || 20));
-  let rate = Math.max(0.5, Math.min(1.2, Number(params.get('r')) || 0.9));
+  let data = null;
+  try {
+    const d = params.get('d');
+    if (d) {
+      const bin = atob(d.replace(/-/g, '+').replace(/_/g, '/'));
+      data = JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0))));
+    }
+  } catch (e) { data = null; }
+  const items = data
+    ? (data.s || []).map(([en, ko = '']) => ({ en, ko })).filter((x) => x.en)
+    : params.getAll('s').map((v) => { const [en, ko = ''] = v.split('|'); return { en, ko }; }).filter((x) => x.en);
+  const target = Math.max(1, Math.min(100, Number(data ? data.n : params.get('n')) || 20));
+  let rate = Math.max(0.5, Math.min(1.2, Number(data ? data.r : params.get('r')) || 0.9));
   const done = items.map(() => 0);
   let idx = 0, playing = false, token = 0;
 
