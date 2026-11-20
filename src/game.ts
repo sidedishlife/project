@@ -203,10 +203,13 @@ function startMediaMode() {
     }
   } catch (e) { mediaModeState = `켜기 실패: ${e}`; }
 }
-// 다른 앱으로 갔다 오면 다시 켬
+// 다른 앱으로 가면 멈춤
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) mediaKeepAlive?.pause();
 });
+// 영어 음성이 나오는 동안에는 무음 반복 소리를 멈춤 (아이폰이 음성 소리를 줄이거나 막는 경우 방지)
+window.addEventListener('speech-start', () => mediaKeepAlive?.pause());
+window.addEventListener('speech-end', () => { if (mediaKeepAlive && !document.hidden) mediaKeepAlive.play().catch(() => {}); });
 
 /** 첫 터치 때 호출: 모바일은 탭 안에서 오디오를 깨워야 소리가 남 */
 export function unlockAudio() {

@@ -6,7 +6,7 @@ import { mergeCards, mergeStats } from './sync';
 import { icon } from './icons';
 import { sticker, stickerRaw, STICKERS, GOLD_LEVEL, newlyUnlocked, type StickerName } from './stickers';
 import { schedule, isDue, newCardSchedule, formatDue, STAGE_LABELS, type Grade } from './srs';
-import { speak, stopSpeaking, listenKorean, stopListening, sttSupported, ttsSupported, unlockSpeech, soundReport, setVoicePref, claudeVoiceAvailable } from './speech';
+import { speak, stopSpeaking, listenKorean, stopListening, sttSupported, ttsSupported, unlockSpeech, soundReport, setVoicePref, claudeVoiceAvailable, englishVoices, setVoiceName } from './speech';
 import {
   loadCards, saveCards, loadStats, saveStats, loadSettings, saveSettings, touchStreak, exportBackup, importBackup, fixStats, loadTombstones, addTombstone, requestPersistentStorage,
 } from './store';
@@ -23,6 +23,7 @@ let stats = loadStats();
 let settings = loadSettings();
 setSound(settings.sound);
 setVoicePref(settings.voice ?? 'auto');
+setVoiceName(settings.voiceName ?? '');
 let sync: SyncState = 'local';
 let loaded = false; // 계정 기록 불러오기 끝났는지
 onSync((st) => { sync = st; const el = document.getElementById('sync'); if (el) el.outerHTML = syncChip(); });
@@ -424,6 +425,17 @@ function soundStatusHTML() {
       <button class="btn sm plain" data-action="sfx-test">${icon('bell')} 효과음 테스트</button>
     </div>
   </div>
+  ${(() => {
+    const vs = englishVoices();
+    if (!vs.length || d.engine === 'claude') return '';
+    const cur = settings.voiceName ?? '';
+    return `<label for="voicename">휴대폰 목소리</label>
+    <select id="voicename">
+      <option value="" ${cur === '' ? 'selected' : ''}>자동 (시스템 기본)</option>
+      ${vs.map((v) => `<option value="${esc(v.name)}" ${cur === v.name ? 'selected' : ''}>${esc(v.name)} · ${esc(v.lang)}${v.local ? '' : ' · 인터넷'}</option>`).join('')}
+    </select>
+    <p class="hint">소리가 안 나면 다른 목소리를 고르고 영어 소리 테스트를 눌러 보세요.</p>`;
+  })()}
   <details class="sound-help" ${!ok || d.place === '앱 안 화면' ? 'open' : ''}>
     <summary>재생 성공인데 소리가 안 들리면?</summary>
     ${soundHelpHTML()}
@@ -487,6 +499,7 @@ function saveSettingsFromForm() {
     listenTarget: Math.max(1, Math.min(100, Number(val('target')?.value) || 20)),
     sound: val('sound')?.checked ?? settings.sound,
     voice: settings.voice ?? 'auto',
+    voiceName: settings.voiceName ?? '',
   };
   setSound(settings.sound);
   saveSettings(settings);
@@ -830,6 +843,12 @@ app.addEventListener('input', (e) => {
 app.addEventListener('change', async (e) => {
   const t = e.target as HTMLInputElement;
   if (t.id === 'sound') saveSettingsFromForm();
+  if (t.id === 'voicename') {
+    settings = { ...settings, voiceName: (t as unknown as HTMLSelectElement).value };
+    saveSettings(settings);
+    setVoiceName(settings.voiceName!);
+    speak('Hello! This is my voice.', settings.rate).then(() => { if (ui.view === 'settings') render(); });
+  }
   if (t.id === 'import' && t.files?.[0]) {
     try {
       importBackup(await t.files[0].text());

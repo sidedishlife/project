@@ -50,4 +50,5 @@ export interface Settings {
   listenTarget: number; // 기본 20회
   sound: boolean; // 효과음
   voice?: 'auto' | 'claude' | 'device'; // 영어 읽기 음성
+  voiceName?: string; // 휴대폰 음성 중 고른 목소리 ('' = 자동)
 }

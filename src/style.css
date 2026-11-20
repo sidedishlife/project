@@ -96,7 +96,7 @@ a { color: var(--pink-d); }
 .icon:active { background: var(--paper-2); }
 .link { border: 0; background: none; color: var(--pink-d); font: inherit; font-size: 13px; font-weight: 800; cursor: pointer; padding: 0; }
 
-textarea, input[type=text], input[type=password], input[type=search], input[type=number] {
+textarea, select, input[type=text], input[type=password], input[type=search], input[type=number] {
   width: 100%; border: 1.5px solid var(--line); border-radius: 18px; padding: 14px 16px; font: inherit;
   background: var(--paper-2); color: var(--text); margin-top: 8px; resize: none; transition: border-color .15s, box-shadow .15s;
 }

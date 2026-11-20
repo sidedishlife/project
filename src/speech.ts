@@ -38,6 +38,23 @@ if (hasSynth()) {
   speechSynthesis.addEventListener?.('voiceschanged', pickVoice);
 }
 
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+let voiceName = ''; // 사용자가 고른 목소리 이름 ('' = 자동)
+export const setVoiceName = (n: string) => { voiceName = n; };
+/** 아이폰은 이름으로 고른 목소리가 실제로는 내려받지 않은 상태일 수 있어, 따로 고르지 않으면 시스템에 맡김 */
+function chosenVoice(): SpeechSynthesisVoice | null {
+  if (voiceName) return speechSynthesis.getVoices().find((v) => v.name === voiceName) ?? null;
+  return isIOS ? null : voice;
+}
+/** 고를 수 있는 영어 목소리 목록 */
+export function englishVoices(): { name: string; lang: string; local: boolean }[] {
+  if (!hasSynth()) return [];
+  return speechSynthesis.getVoices()
+    .filter((v) => v.lang.toLowerCase().startsWith('en'))
+    .map((v) => ({ name: v.name, lang: v.lang, local: v.localService }));
+}
+export const currentVoiceName = () => voiceName;
+
 export type Engine = 'browser' | 'claude' | 'none';
 export type VoicePref = 'auto' | 'claude' | 'device';
 let pref: VoicePref = 'auto';
@@ -124,16 +141,33 @@ function speakWithDevice(text: string, rate: number): Promise<void> {
       u.lang = 'en-US';
       u.rate = rate;
       u.volume = 1;
-      if (voice) u.voice = voice;
+      const chosen = chosenVoice();
+      if (chosen) { try { u.voice = chosen; } catch { /* 목소리 지정 실패 시 시스템 기본 */ } }
+      const label = chosen?.name ?? '시스템 기본 영어 음성';
+      let t0 = 0;
+      window.dispatchEvent(new CustomEvent('speech-start'));
       u.onstart = () => {
         started = true;
         failStreak = 0;
-        diag.last = `재생 성공 (${voice?.name ?? '기본 영어 음성'})`;
+        t0 = performance.now();
+        diag.last = `재생 시작 (${label})`;
         diag.okCount++;
       };
-      u.onend = () => { started = true; if (current === u) current = null; done(); };
+      u.onend = () => {
+        started = true;
+        if (current === u) current = null;
+        // 실제로 읽었다면 문장 길이만큼 시간이 걸림. 너무 빨리 끝나면 소리 없이 끝난 것
+        const sec = t0 ? (performance.now() - t0) / 1000 : 0;
+        const expect = Math.max(0.6, (text.split(/\s+/).length * 0.3) / rate);
+        diag.last = sec < expect * 0.4
+          ? `소리 없이 끝남: ${sec.toFixed(1)}초 (${label}) → 다른 목소리를 골라 보세요`
+          : `읽기 완료: ${sec.toFixed(1)}초 (${label})`;
+        window.dispatchEvent(new CustomEvent('speech-end'));
+        done();
+      };
       u.onerror = (e) => {
         const code = (e as SpeechSynthesisErrorEvent).error;
+        window.dispatchEvent(new CustomEvent('speech-end'));
         if (code === 'interrupted' || code === 'canceled') { started = true; return done(); }
         clearTimeout(startCheck);
         fail(`브라우저 음성 오류: ${code}`);
