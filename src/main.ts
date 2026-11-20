@@ -11,7 +11,7 @@ import {
   loadCards, saveCards, loadStats, saveStats, loadSettings, saveSettings, touchStreak, exportBackup, importBackup, fixStats, loadTombstones, addTombstone, requestPersistentStorage,
 } from './store';
 import {
-  levelOf, xpForLevel, FORMS, formIndex, ballSVG, josa, rarity, QUESTS, BADGES, sfx, setSound, confetti, floatXp, unlockAudio, audioState, mediaModeState,
+  levelOf, xpForLevel, FORMS, formIndex, ballSVG, josa, rarity, QUESTS, BADGES, sfx, setSound, confetti, floatXp,
 } from './game';
 
 // ───────────────────────── 상태 ─────────────────────────
@@ -416,13 +416,11 @@ function soundStatusHTML() {
       ${row('기기 · 열린 곳', `${d.device} · ${d.place}`, d.place === '앱 안 화면')}
       ${row('영어 음성', d.synth ? `${d.enVoices}개 (전체 ${d.voices}개)` : '없음', !d.synth || d.enVoices === 0)}
       ${row('Claude 음성', d.claude ? '사용 가능' : '이 화면에선 안 됨')}
-      ${row('효과음 엔진', audioState())}
-      ${row('무음 모드 우회', mediaModeState, mediaModeState.startsWith('켜기 실패'))}
       ${row('마지막 재생', d.last, d.fail > 0 && d.ok === 0)}
     </div>
     <div class="row tight">
       <button class="btn sm go" data-action="sound-test">${icon('volume')} 영어 소리 테스트</button>
-      <button class="btn sm plain" data-action="sfx-test">${icon('bell')} 효과음 테스트</button>
+
     </div>
   </div>
   ${(() => {
@@ -466,7 +464,7 @@ function settingsView() {
     ${soundStatusHTML()}
     <label for="rate">읽기 속도 <b id="rate-v">${settings.rate.toFixed(2)}x</b></label><input id="rate" type="range" min="0.5" max="1.2" step="0.05" value="${settings.rate}">
     <label for="target">표현당 목표 듣기 횟수</label><input id="target" type="number" min="1" max="100" value="${settings.listenTarget}">
-    <label class="switch"><input id="sound" type="checkbox" ${settings.sound ? 'checked' : ''}> 효과음·진동</label>
+    <label class="switch"><input id="sound" type="checkbox" ${settings.sound ? 'checked' : ''}> 진동 (안드로이드)</label>
     <h3 class="sub-h">${icon('paw')}강아지 이름</h3>
     <input id="petname" type="text" maxlength="10" value="${esc(pet())}" aria-label="강아지 이름">
     ${hasClaude ? '' : `
@@ -996,12 +994,6 @@ document.addEventListener('click', async (e) => {
       sfx('tap');
       return render();
     }
-    case 'sfx-test':
-      setSound(true);
-      sfx('levelup');
-      setSound(settings.sound);
-      setTimeout(() => { if (ui.view === 'settings') render(); }, 300);
-      return;
     case 'close-levelup':
       document.querySelector('.levelup')?.remove();
       return;
@@ -1073,8 +1065,8 @@ document.addEventListener('click', async (e) => {
 });
 
 // 첫 터치 때 소리 잠금 해제 (모바일은 탭 안에서 한 번 소리를 깨워야 함)
-document.addEventListener('pointerdown', () => { unlockSpeech(); unlockAudio(); }, { capture: true });
-document.addEventListener('touchend', () => { unlockSpeech(); unlockAudio(); }, { capture: true });
+document.addEventListener('pointerdown', () => { unlockSpeech(); }, { capture: true });
+document.addEventListener('touchend', () => { unlockSpeech(); }, { capture: true });
 
 // 영어 음성을 낼 수 없으면 한 번 안내
 let soundHelpShown = false;

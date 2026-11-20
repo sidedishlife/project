@@ -147,100 +147,13 @@ export const BADGES = [
   { id: 'lv8', icon: 'paw', name: '다 컸네!', desc: 'Lv.8 달성', test: (s: Stats) => levelOf(s.xp) >= 8 },
 ];
 
-// ───────────────────────── 효과음 & 진동 ─────────────────────────
-let ac: AudioContext | null = null;
-export let soundOn = true;
+// ───────────────────────── 진동 ─────────────────────────
+// 효과음은 쓰지 않음(사용자 요청). 안드로이드에서만 짧은 진동으로 손맛을 줌
+export let soundOn = true; // 설정의 '진동' 켜기/끄기
 export const setSound = (on: boolean) => (soundOn = on);
-
-function tone(freq: number, start: number, dur: number, type: OscillatorType = 'triangle', vol = 0.12) {
-  if (!ac) return;
-  const o = ac.createOscillator();
-  const g = ac.createGain();
-  o.type = type;
-  o.frequency.setValueAtTime(freq, ac.currentTime + start);
-  g.gain.setValueAtTime(0.0001, ac.currentTime + start);
-  g.gain.exponentialRampToValueAtTime(vol, ac.currentTime + start + 0.01);
-  g.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + start + dur);
-  o.connect(g).connect(ac.destination);
-  o.start(ac.currentTime + start);
-  o.stop(ac.currentTime + start + dur + 0.02);
-}
-
-/** 첫 터치 때 호출: 모바일은 탭 안에서 오디오를 깨워야 소리가 남 */
-// ── 아이폰 무음 모드 우회
-// 아이폰은 무음 모드면 웹페이지 효과음과 음성을 꺼버리지만, '미디어 재생'(동영상 소리) 중에는 소리를 냄.
-// 그래서 첫 터치 때 들리지 않는 아주 짧은 오디오를 반복 재생해 두어 이 페이지를 미디어 재생 상태로 만든다.
-let mediaKeepAlive: HTMLAudioElement | null = null;
-export let mediaModeState = '아직 안 켜짐';
-
-function silentWavUrl() {
-  const rate = 8000, n = rate / 2; // 0.5초 무음
-  const buf = new ArrayBuffer(44 + n);
-  const v = new DataView(buf);
-  const str = (o: number, t: string) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
-  str(0, 'RIFF'); v.setUint32(4, 36 + n, true); str(8, 'WAVE'); str(12, 'fmt ');
-  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
-  v.setUint32(24, rate, true); v.setUint32(28, rate, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
-  str(36, 'data'); v.setUint32(40, n, true);
-  for (let i = 0; i < n; i++) v.setUint8(44 + i, 128); // 8비트 무음
-  return URL.createObjectURL(new Blob([buf], { type: 'audio/wav' }));
-}
-
-function startMediaMode() {
-  try {
-    if (!mediaKeepAlive) {
-      mediaKeepAlive = document.createElement('audio');
-      mediaKeepAlive.src = silentWavUrl();
-      mediaKeepAlive.loop = true;
-      mediaKeepAlive.setAttribute('playsinline', '');
-      mediaKeepAlive.setAttribute('x-webkit-airplay', 'deny');
-      mediaKeepAlive.preload = 'auto';
-    }
-    if (mediaKeepAlive.paused) {
-      mediaKeepAlive.play()
-        .then(() => { mediaModeState = '켜짐 (무음 모드에서도 소리)'; })
-        .catch((e) => { mediaModeState = `켜기 실패: ${e?.name ?? e}`; });
-    }
-  } catch (e) { mediaModeState = `켜기 실패: ${e}`; }
-}
-// 다른 앱으로 가면 멈춤
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) mediaKeepAlive?.pause();
-});
-// 영어 음성이 나오는 동안에는 무음 반복 소리를 멈춤 (아이폰이 음성 소리를 줄이거나 막는 경우 방지)
-window.addEventListener('speech-start', () => mediaKeepAlive?.pause());
-window.addEventListener('speech-end', () => { if (mediaKeepAlive && !document.hidden) mediaKeepAlive.play().catch(() => {}); });
-
-/** 첫 터치 때 호출: 모바일은 탭 안에서 오디오를 깨워야 소리가 남 */
-export function unlockAudio() {
-  startMediaMode();
-  try {
-    ac ??= new AudioContext();
-    if (ac.state === 'suspended') void ac.resume();
-    const b = ac.createBuffer(1, 1, 22050);
-    const src = ac.createBufferSource();
-    src.buffer = b;
-    src.connect(ac.destination);
-    src.start(0);
-  } catch { /* 미지원 */ }
-}
-
-/** 효과음 엔진 상태 (점검용) */
-export const audioState = () => (ac ? ac.state : '아직 안 켜짐');
 
 export function sfx(kind: 'tap' | 'good' | 'bad' | 'levelup' | 'quest' | 'combo' | 'bark') {
   if (!soundOn) return;
-  try {
-    ac ??= new AudioContext();
-    if (ac.state === 'suspended') ac.resume();
-    if (kind === 'tap') tone(660, 0, 0.06, 'square', 0.04);
-    if (kind === 'bark') { tone(520, 0, 0.07, 'square', 0.07); tone(380, 0.05, 0.09, 'square', 0.06); tone(560, 0.2, 0.07, 'square', 0.07); tone(400, 0.25, 0.09, 'square', 0.06); }
-    if (kind === 'good') { tone(784, 0, 0.1); tone(1175, 0.08, 0.16); }
-    if (kind === 'combo') { tone(880, 0, 0.08); tone(1175, 0.06, 0.08); tone(1568, 0.12, 0.18); }
-    if (kind === 'bad') { tone(220, 0, 0.18, 'sawtooth', 0.06); tone(165, 0.12, 0.22, 'sawtooth', 0.06); }
-    if (kind === 'quest') { [523, 659, 784].forEach((f, i) => tone(f, i * 0.08, 0.14)); }
-    if (kind === 'levelup') { [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, i * 0.1, 0.25, 'triangle', 0.14)); }
-  } catch { /* 소리 미지원 */ }
   const pattern = { bark: [15, 60, 15], tap: 8, good: 20, combo: [20, 40, 20], bad: [60, 40, 60], quest: [30, 30, 30], levelup: [40, 60, 40, 60, 120] }[kind];
   try { navigator.vibrate?.(pattern as number | number[]); } catch { /* 진동 미지원 */ }
 }
