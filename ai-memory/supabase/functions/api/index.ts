@@ -7,6 +7,8 @@ import { validateConfigPatch } from './config.ts';
 import { supabaseRepo } from './repo.ts';
 import { confirmCandidate, getNote, listNotes, pasteConversation, type Decision, type IngestDeps } from './ingest.ts';
 import * as ai from './ai.ts';
+import { handleMcpRequest } from './mcp.ts';
+import { submitCandidates } from './ingest.ts';
 
 const repo = supabaseRepo();
 /** 실제 저장소·AI·설정을 묶은 ingest 의존성 (요청마다 설정을 새로 읽는다) */
@@ -89,6 +91,14 @@ export async function route(req: Request): Promise<Response> {
     const ok = data ? await verifyPassword(String(b.password ?? ''), data.password_hash) : (await pbkdf2('x', new Uint8Array(16), 100_000), false);
     if (!ok || !data) throw new HttpError(401, '이름 또는 비밀번호가 맞지 않아요');
     return json({ token: await newSession(data.id), user: { id: data.id, name: data.name } });
+  }
+
+  // MCP: 앱 로그인 없이 경로의 비밀값이 인증 (requireUser보다 먼저)
+  const mcpM = path.match(/^\/mcp\/([^/]+)$/);
+  if (mcpM) {
+    const { mcp_secret } = await config(['mcp_secret']);
+    return await handleMcpRequest(req, decodeURIComponent(mcpM[1]), typeof mcp_secret === 'string' ? mcp_secret : null,
+      async (source, items) => submitCandidates(await ingestDeps(), source, items));
   }
 
   // ── 여기부터 로그인 필요
