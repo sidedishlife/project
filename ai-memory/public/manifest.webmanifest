@@ -1,0 +1,10 @@
+{
+  "name": "AI 기억장",
+  "short_name": "기억장",
+  "lang": "ko",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#1b1b1f",
+  "theme_color": "#1b1b1f",
+  "icons": []
+}

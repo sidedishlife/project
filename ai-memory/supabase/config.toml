@@ -1,0 +1,10 @@
+project_id = "ai-memory"
+
+[api]
+enabled = true
+
+[db]
+major_version = 16
+
+[functions.api]
+verify_jwt = false

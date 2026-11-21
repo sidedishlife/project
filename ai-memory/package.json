@@ -1,0 +1,19 @@
+{
+  "name": "ai-memory",
+  "version": "0.1.0",
+  "description": "AI 기억장 — AI와 나눈 대화에서 건진 개념을 간격 복습으로 기억하는 개인용 PWA",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc && vite build",
+    "preview": "vite preview --host",
+    "test": "vitest run",
+    "test:server": "deno test -A supabase/functions/api"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.1"
+  },
+  "private": true,
+  "type": "module"
+}
