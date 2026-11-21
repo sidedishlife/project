@@ -67,3 +67,9 @@ Deno.test('extractCandidates: 최대 3개로 자름', async () => {
   const r = await extractCandidates('대화', opts(fake(reply({ candidates: [c, c, c, c, c] }))));
   assertEquals(r?.length, 3);
 });
+Deno.test('extractCandidates: 형식이 깨진 후보·질문은 걸러냄', async () => {
+  const good = { title: 't', note_md: 'n', questions: [{ kind: 'explain', prompt: 'p' }, { kind: 'bad', prompt: 'x' }, { kind: 'apply', prompt: 3 }] };
+  const r = await extractCandidates('x', opts(fake(reply({ candidates: [good, { title: 1, note_md: 'n', questions: [] }, { title: 't', note_md: 'n' }] }))));
+  assertEquals(r?.length, 1);
+  assertEquals(r?.[0].questions, [{ kind: 'explain', prompt: 'p' }]);
+});
