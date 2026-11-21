@@ -6,9 +6,9 @@ import { unlockAudio, playTimes, stopAudio, prefetchVoice, getRate, setRate } fr
 import { pushState, enablePush, disablePush } from './push';
 import { recordingSupported, startRecording, stopAndTranscribe, cancelRecording } from './recorder';
 import { MASTERED_STAGE } from '../supabase/functions/api/srs';
-import { XP, levelOf, regionOf, tierOf, ALL_TIERS, QUESTS, REGIONS, BADGES, emptyDay, emptyTotals, needFor, type Day, type Totals, type Ctx } from './game';
+import { XP, levelOf, regionOf, tierOf, ALL_TIERS, QUESTS, REGIONS, BADGES, CHAPTERS, monsterName, emptyDay, emptyTotals, needFor, type Day, type Totals, type Ctx } from './game';
 import { compare, hintOf, type SpeakResult } from './speak';
-import { heroImg, castImg, faceImg, faceUrl, monsterImg, sceneBg, preloadArt, type Face } from './art';
+import { heroImg, castImg, faceImg, faceUrl, monsterImg, sceneBg, preloadArt, npcImg } from './art';
 
 const app = document.getElementById('app')!;
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
@@ -69,7 +69,7 @@ const level = () => levelOf(stats?.xp ?? 0);
 /** 경험치를 주고, 레벨이 오르면 축하 창을 띄움. 오늘 기록(day)도 함께 저장 */
 function totals(): Totals { return { ...emptyTotals(), ...(stats?.totals ?? {}) }; }
 function ctx(t = totals()): Ctx {
-  return { cards: cards.length, mastered: cards.filter((c) => c.stage >= MASTERED_STAGE).length, gold: cards.filter((c) => c.stage >= 4).length, streak: stats?.streak ?? 0, combo: Math.max(stats?.best_combo ?? 0, review.combo), t };
+  return { cards: cards.length, mastered: cards.filter((c) => c.stage >= MASTERED_STAGE).length, gold: cards.filter((c) => c.stage >= 4).length, silver: cards.filter((c) => c.stage >= 2).length, streak: stats?.streak ?? 0, combo: Math.max(stats?.best_combo ?? 0, review.combo), t };
 }
 function gain(xp: number, change: (d: Day) => void = () => {}, changeT: (t: Totals) => void = () => {}) {
   if (!stats) return;
@@ -110,8 +110,65 @@ function levelUp(from: number, to: number) {
     <p class="lvbig">Lv.${from} → <b>Lv.${to}</b></p>
     ${r1 !== r2 ? `<p class="unlock">🗺️ 새 지역 <b>${r2.name}</b>이 열렸어요!<br>새 칭호: <b>${r2.title}</b></p>` : `<p class="muted">다음 지역까지 조금만 더!</p>`}
     <button class="btn gold" data-close>계속하기</button></div>`;
-  pop.addEventListener('click', (e) => { if ((e.target as HTMLElement).closest('[data-close]')) pop.remove(); });
+  pop.addEventListener('click', (e) => { if ((e.target as HTMLElement).closest('[data-close]')) { pop.remove(); maybeStory(); } });
   document.body.appendChild(pop);
+}
+
+/** 이야기 장면: 안내 인물의 대사를 한 장씩 넘겨 봄 */
+function showStory(feature: keyof typeof CHAPTERS, onDone: () => void = () => {}) {
+  const ch = CHAPTERS[feature];
+  const r = REGIONS.find((g) => g.feature === feature)!;
+  let i = 0;
+  const pop = document.createElement('div');
+  pop.className = 'modal story';
+  const draw = () => {
+    pop.innerHTML = `<div class="story-scene" style="background-image:url(./art/bg-${feature}.webp)">
+      <div class="story-title">제${ch.no}장 · ${r.name}</div>
+      <div class="dialog-box with-face story-box">${npcImg(ch.img, 'dlg-face')}<b class="speaker">${ch.npc}</b>
+        <p>${ch.arrive[i]}</p>
+        <div class="story-nav"><small>${i + 1} / ${ch.arrive.length}</small><button class="btn gold mini" data-next>${i < ch.arrive.length - 1 ? '다음 ▶' : '모험 시작!'}</button></div>
+      </div></div>`;
+  };
+  pop.addEventListener('click', (e) => {
+    if (!(e.target as HTMLElement).closest('[data-next], .story-box')) return;
+    if (i < ch.arrive.length - 1) { i++; draw(); } else { pop.remove(); onDone(); }
+  });
+  draw();
+  document.body.appendChild(pop);
+}
+
+/** 지금 지역의 이야기를 아직 안 봤으면 보여 줌 */
+function maybeStory() {
+  if (!stats || document.querySelector('.modal')) return;
+  const f = regionOf(level().lv).feature;
+  const key = `seen-${f}`;
+  if ((stats.badges ?? []).includes(key)) return;
+  stats.badges = [...(stats.badges ?? []), key];
+  api.saveStats({ badges: stats.badges }).catch(() => {});
+  showStory(f);
+}
+
+/** 장의 임무 보상 받기 */
+function claimMission() {
+  if (!stats) return;
+  const f = regionOf(level().lv).feature;
+  const ch = CHAPTERS[f];
+  const id = `ch-${f}`;
+  if ((stats.badges ?? []).includes(id) || ch.mission.now(ctx()) < ch.mission.goal) return;
+  stats.badges = [...(stats.badges ?? []), id];
+  gain(ch.mission.xp);
+  floatXP(`📜 +${ch.mission.xp} XP`);
+  toast(`제${ch.no}장 임무 완료! ${ch.npc}: "훌륭해요!"`, 4000);
+  render();
+}
+
+function goMission() {
+  const ch = CHAPTERS[regionOf(level().lv).feature];
+  const g = ch.mission.go;
+  if (g === 'create') return go('create');
+  if (g === 'list') return go('list');
+  if (g === 'speak') return goQuest('speak');
+  return dueCards().length ? go('review') : (toast('지금은 몬스터가 없어요. 복습 시간이 되면 나타나요'), go('list'));
 }
 
 /** 받은 경험치가 위로 떠오르는 효과 */
@@ -210,12 +267,10 @@ function homeView() {
   const r = regionOf(lv);
   const next = cards.filter((c) => c.due > now()).sort((a, b) => a.due - b.due)[0];
   const d = today();
-  const face: Face = due ? 'wow' : 'happy';
-  const line = !cards.length
-    ? '첫 주문을 배워 볼까요? 영어로 하고 싶은 말을 한국어로 알려 주세요!'
-    : due
-      ? `잊어버리기 직전인 주문이 <b>${due}개</b> 있어요! 몬스터가 되기 전에 물리쳐요.`
-      : `지금은 나타난 몬스터가 없어요. ${next ? `다음 몬스터는 <b>${when(next.due)}</b>에 나타나요.` : ''} 그동안 새 주문을 배워 둘까요?`;
+  const ch = CHAPTERS[r.feature];
+  const line = !cards.length ? ch.empty : due ? ch.due(due) : `${ch.idle}${next ? ` <small>(다음 몬스터: ${when(next.due)})</small>` : ''}`;
+  const mNow = Math.min(ch.mission.now(ctx()), ch.mission.goal);
+  const mDone = mNow >= ch.mission.goal, mClaimed = (stats?.badges ?? []).includes(`ch-${r.feature}`);
   const cta = due
     ? `<button class="btn gold big" data-go="review">⚔️ 모험 출발 <small>${due}마리</small></button>`
     : `<button class="btn gold big" data-go="create">✨ 새 주문 배우기</button>`;
@@ -231,8 +286,16 @@ function homeView() {
       <button class="region" data-go="hero">📍 ${r.name} ›</button>
       <div class="stage-hero">${heroImg()}</div>
     </section>
-    <section class="dialog-box with-face" data-act="cta">${faceImg(face, 'dlg-face')}<b class="speaker">${esc(me?.name)}</b><p>${line}</p></section>
+    <section class="dialog-box with-face" data-act="cta">${npcImg(ch.img, 'dlg-face')}<b class="speaker">${ch.npc}</b><p>${line}</p></section>
     ${cta}
+    <section class="panel mission ${mClaimed ? 'claimed' : ''}" data-act="${mClaimed ? 'story' : 'mission'}">
+      <div class="ribbon">📜 제${ch.no}장 임무</div>
+      <div class="m-row"><span>${ch.mission.label}</span><small>${mNow}/${ch.mission.goal}</small></div>
+      <div class="mini-bar wide"><i style="width:${Math.round((mNow / ch.mission.goal) * 100)}%"></i></div>
+      ${mClaimed ? `<p class="hint center">✔ 완료! 레벨을 올려 다음 지역으로 떠나요 (다시 보려면 누르기)</p>`
+        : mDone ? `<button class="btn gold" data-act="mission-claim">보상 받기 +${ch.mission.xp} XP</button>`
+        : `<p class="hint center">${ch.npc}의 부탁 · 보상 +${ch.mission.xp} XP · 누르면 바로 이동</p>`}
+    </section>
     <section class="panel">
       <div class="ribbon">오늘의 퀘스트</div>
       <ul class="quests">${quests}</ul>
@@ -241,7 +304,7 @@ function homeView() {
     <section class="row3">
       <button class="panel mini-stat" data-act="dex-all"><b>${cards.length}</b><span>📖 배운 주문 ›</span></button>
       <button class="panel mini-stat" data-act="dex-master"><b>${mastered}</b><span>👑 마스터 ›</span></button>
-      <button class="panel mini-stat" data-go="hero"><b>${(stats?.badges ?? []).length}/${BADGES.length}</b><span>🏆 업적 ›</span></button>
+      <button class="panel mini-stat" data-go="hero"><b>${BADGES.filter((b) => (stats?.badges ?? []).includes(b.id)).length}/${BADGES.length}</b><span>🏆 업적 ›</span></button>
     </section>
   </main>`;
 }
@@ -314,7 +377,7 @@ function reviewView() {
   let html = `<main>
     <section class="battle">
       ${sceneBg(r)}
-      <div class="bt-top"><span>남은 몬스터 ${left}</span>${review.combo > 1 ? `<span class="combo">${review.combo} COMBO!</span>` : ''}<span style="color:${tier.color}">${tier.icon} ${tier.name}</span></div>
+      <div class="bt-top"><span>${monsterName(c.stage, r)} · 남은 ${left}</span>${review.combo > 1 ? `<span class="combo">${review.combo} COMBO!</span>` : ''}<span style="color:${tier.color}">${tier.icon} ${tier.name}</span></div>
       <div class="bt-monster"><div class="hp"><i style="width:${review.hit ? 0 : 100}%"></i></div>${monsterImg(c.stage, review.hit)}</div>
       <div class="bt-hero">${review.revealed ? castImg('casting') : heroImg()}</div>
     </section>
@@ -392,13 +455,15 @@ function heroView() {
       <div class="ribbon">모험 지도</div>
       <ol class="map">${REGIONS.map((g) => {
         const open = lv >= g.from, here = g === r;
-        return `<li class="${open ? 'open' : 'locked'} ${here ? 'here' : ''}" style="background-image:url(./art/bg-${g.feature}.webp)">
-          <span>${open ? '' : '🔒 '}${g.name}</span><small>Lv.${g.from}~ · ${g.title}${here ? ' · 지금 여기' : ''}</small></li>`;
+        const chg = CHAPTERS[g.feature];
+        const doneCh = (stats?.badges ?? []).includes(`ch-${g.feature}`);
+        return `<li class="${open ? 'open' : 'locked'} ${here ? 'here' : ''}" data-region="${g.feature}" data-from="${g.from}" style="background-image:url(./art/bg-${g.feature}.webp)">
+          <span>제${chg.no}장 ${open ? '' : '🔒 '}${g.name}${doneCh ? ' ✔' : ''}</span><small>Lv.${g.from}~ · ${chg.npc} · ${open ? chg.mission.label : `Lv.${g.from}에 열려요`}${here ? ' · 지금 여기' : ''}</small></li>`;
       }).join('')}</ol>
       ${nextRegion ? `<p class="hint center">다음 지역 <b>${nextRegion.name}</b>까지 약 ${toNext} XP</p>` : `<p class="hint center">모든 지역을 열었어요!</p>`}
     </section>
     <section class="panel">
-      <div class="ribbon">업적 ${owned.size}/${BADGES.length}</div>
+      <div class="ribbon">업적 ${BADGES.filter((b) => owned.has(b.id)).length}/${BADGES.length}</div>
       <div class="badges">${BADGES.map((b) => {
         const has = owned.has(b.id); const now = Math.min(b.now(c), b.goal);
         return `<div class="badge-item ${has ? 'got' : ''}"><span class="bi">${has ? b.icon : '🔒'}</span><b>${b.name}</b><small>${b.desc}</small>
@@ -506,6 +571,7 @@ async function start() {
       me = (await api.me()).user;
       await loadAll();
       screen = 'home';
+      setTimeout(maybeStory, 400);
     } else {
       screen = (await api.status()).setup_needed ? 'setup' : 'login';
     }
@@ -684,13 +750,17 @@ app.addEventListener('input', (e) => {
 });
 
 app.addEventListener('click', async (e) => {
-  const el = (e.target as HTMLElement).closest('button, .w, [data-quest], [data-act]') as HTMLElement | null;
+  const el = (e.target as HTMLElement).closest('button, .w, [data-quest], [data-act], [data-region]') as HTMLElement | null;
   if (!el) return;
   const d = el.dataset;
   if (d.go) return go(d.go as Screen);
   if (d.rate) { setRate(Number(d.rate)); render(); return; }
   if (d.claim) return claimQuest(d.claim);
   if (d.quest) return goQuest(d.quest);
+  if (d.region) {
+    if (level().lv < Number(d.from)) return toast(`Lv.${d.from}이 되면 열려요. 지금 Lv.${level().lv}`);
+    return showStory(d.region as keyof typeof CHAPTERS);
+  }
   if (d.speak) return toggleSpeak(d.speak);
   if (d.tier !== undefined) { tierFilter = d.tier; return render(); }
   if (d.word) {
@@ -734,6 +804,9 @@ app.addEventListener('click', async (e) => {
     case 'save': return save();
     case 'reveal': return reveal();
     case 'hint': review.hint = true; return render();
+    case 'mission': return goMission();
+    case 'mission-claim': return claimMission();
+    case 'story': return showStory(regionOf(level().lv).feature);
     case 'cta': return dueCards().length ? go('review') : go('create');
     case 'dex-all': tierFilter = ''; return go('list');
     case 'dex-master': tierFilter = 'master'; return go('list');
@@ -792,6 +865,7 @@ app.addEventListener('submit', async (e) => {
     setToken(r.token); me = r.user;
     await run('불러오는 중…', loadAll);
     go('home');
+    setTimeout(maybeStory, 400);
   }
   if (f.id === 'add-user') {
     const r = await run('계정 만드는 중…', () => api.addUser(name, password));

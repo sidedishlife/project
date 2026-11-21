@@ -25,7 +25,9 @@ export const sceneBg = (r: Region) => `<div class="scene" style="background-imag
 
 /** 처음 열 때 그림을 미리 받아 둠 (화면 전환 때 깜빡임 방지) */
 export function preloadArt() {
-  for (const f of ['hero', 'hero-cast', 'face-happy', 'face-wow', 'face-sad', 'mon-slime', 'mon-ghost', 'mon-fire', 'bg-village']) {
+  for (const f of ['npc-teacher', 'hero', 'hero-cast', 'face-happy', 'face-wow', 'face-sad', 'mon-slime', 'mon-ghost', 'mon-fire', 'bg-village']) {
     const i = new Image(); i.src = A(f);
   }
 }
+
+export const npcImg = (img: string, cls = '') => `<img class="face-img ${cls}" src="${A(img)}" alt="" draggable="false">`;
