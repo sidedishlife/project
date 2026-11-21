@@ -6,7 +6,7 @@ import type { CandidateInput } from './types.ts';
 export type AnthropicLike = { messages: { create(params: any): Promise<any> } };
 export interface AiOpts { client?: AnthropicLike; model?: string }
 
-const SDK = 'npm:@anthropic-ai/sdk@1.12.0';
+const SDK = 'npm:@anthropic-ai/sdk@1.10.0';
 let cached: AnthropicLike | undefined;
 
 async function defaultClient(): Promise<AnthropicLike> {
