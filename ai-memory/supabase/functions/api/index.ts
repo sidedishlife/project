@@ -7,9 +7,11 @@ import { validateConfigPatch } from './config.ts';
 import { supabaseRepo } from './repo.ts';
 import { confirmCandidate, getNote, listNotes, pasteConversation, type Decision, type IngestDeps } from './ingest.ts';
 import * as ai from './ai.ts';
-import { handleMcpRequest } from './mcp.ts';
+import { handleMcpRequest, safeEqual } from './mcp.ts';
+import { generateVapidKeys, initPush, sendPush, type Sub } from './push.ts';
+import { remind } from './remind.ts';
 import { submitCandidates } from './ingest.ts';
-import { reveal, submitGrade, todayResponse, type ReviewDeps } from './review.ts';
+import { reveal, submitGrade, todayCount, todayResponse, type ReviewDeps } from './review.ts';
 
 const repo = supabaseRepo();
 /** 실제 저장소·AI·설정을 묶은 ingest 의존성 (요청마다 설정을 새로 읽는다) */
@@ -38,6 +40,22 @@ async function reviewDeps(): Promise<ReviewDeps> {
     now: () => new Date(),
     config: { daily_goal: Number(c.daily_goal) },
   };
+}
+
+async function loadSubs(): Promise<Sub[]> {
+  const { data, error } = await db.from('push_subscriptions').select('endpoint, keys');
+  if (error) throw new HttpError(500, error.message);
+  return (data ?? []) as Sub[];
+}
+
+/** 공개 열쇠. 아직 없으면 한 쌍을 만들어 저장(한 번만). */
+async function vapidPublicKey(): Promise<string> {
+  const c = await config(['vapid_public', 'vapid_private']);
+  if (typeof c.vapid_public === 'string' && c.vapid_public && typeof c.vapid_private === 'string' && c.vapid_private) return c.vapid_public;
+  const k = generateVapidKeys();
+  await setConfig('vapid_public', k.publicKey);
+  await setConfig('vapid_private', k.privateKey);
+  return k.publicKey;
 }
 
 function validName(v: unknown) {
@@ -112,6 +130,24 @@ export async function route(req: Request): Promise<Response> {
       async (source, items) => submitCandidates(await ingestDeps(), source, items));
   }
 
+  // 복습 알림 cron: 앱 로그인 없이 x-cron-secret 헤더가 인증 (requireUser보다 먼저)
+  if (m === 'POST' && path === '/cron/remind') {
+    const { cron_secret, vapid_public, vapid_private, slots } = await config(['cron_secret', 'vapid_public', 'vapid_private', 'slots']);
+    const stored = typeof cron_secret === 'string' ? cron_secret : '';
+    const given = req.headers.get('x-cron-secret') ?? '';
+    // 저장된 값이 없으면 항상 거절 (빈 문자열끼리 일치해 통과하는 일이 없도록)
+    if (!stored || !(await safeEqual(given, stored))) throw new HttpError(403, '허용되지 않았어요');
+    if (!initPush(vapid_public, vapid_private)) return json({ slot: null, count: 0, sent: 0, removed: 0, failed: 0 });
+    const rd = await reviewDeps();
+    return json(await remind(new Date(), {
+      slots,
+      count: () => todayCount(new Date(), rd),
+      subs: loadSubs,
+      send: sendPush,
+      remove: async (endpoint) => { await db.from('push_subscriptions').delete().eq('endpoint', endpoint); },
+    }));
+  }
+
   // ── 여기부터 로그인 필요
   await requireUser(req);
 
@@ -152,6 +188,40 @@ export async function route(req: Request): Promise<Response> {
       if (error) throw new HttpError(500, error.message);
       return json({ terms: rows });
     }
+  }
+
+  if (m === 'GET' && path === '/push/key') return json({ key: await vapidPublicKey() });
+
+  if (path === '/push/subscribe') {
+    if (m === 'POST') {
+      const b = await body();
+      const endpoint = String(b.endpoint ?? '');
+      const keys = b.keys;
+      if (!endpoint.startsWith('https://') || !keys?.p256dh || !keys?.auth) throw new HttpError(400, '구독 정보가 올바르지 않아요');
+      const { error } = await db.from('push_subscriptions').upsert({ endpoint, keys: { p256dh: String(keys.p256dh), auth: String(keys.auth) } }, { onConflict: 'endpoint' });
+      if (error) throw new HttpError(500, error.message);
+      return json({ ok: true });
+    }
+    if (m === 'DELETE') {
+      const endpoint = url.searchParams.get('endpoint');
+      if (!endpoint) throw new HttpError(400, 'endpoint가 필요해요');
+      const { error } = await db.from('push_subscriptions').delete().eq('endpoint', endpoint);
+      if (error) throw new HttpError(500, error.message);
+      return json({ ok: true });
+    }
+  }
+
+  if (m === 'POST' && path === '/push/test') {
+    const { vapid_public, vapid_private } = await config(['vapid_public', 'vapid_private']);
+    if (!initPush(vapid_public, vapid_private)) throw new HttpError(400, '알림 열쇠가 아직 없어요');
+    let sent = 0, removed = 0, failed = 0;
+    for (const sub of await loadSubs()) {
+      const r = await sendPush(sub, { title: 'AI 기억장', body: '알림이 잘 와요', url: '/' });
+      if (r === 'ok') sent++;
+      else if (r === 'gone') { await db.from('push_subscriptions').delete().eq('endpoint', sub.endpoint); removed++; }
+      else failed++;
+    }
+    return json({ sent, removed, failed });
   }
 
   if (m === 'GET' && path === '/inbox') return json({ candidates: await repo.listPendingCandidates() });

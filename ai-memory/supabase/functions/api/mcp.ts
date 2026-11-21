@@ -121,7 +121,7 @@ export async function handleMcp(body: unknown, source: Source, submit: Submit): 
 }
 
 /** 길이가 달라도 시간이 새지 않게 비교(해시 후 XOR) */
-async function safeEqual(a: string, b: string): Promise<boolean> {
+export async function safeEqual(a: string, b: string): Promise<boolean> {
   const h = async (s: string) => new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)));
   const [x, y] = await Promise.all([h(a), h(b)]);
   let d = 0;
