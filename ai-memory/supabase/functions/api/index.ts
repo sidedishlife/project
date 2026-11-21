@@ -4,6 +4,27 @@ import { db, config, setConfig } from './db.ts';
 import { CORS, HttpError, json } from './http.ts';
 import { hashPassword, newSession, pbkdf2, requireUser, verifyPassword } from './auth.ts';
 import { validateConfigPatch } from './config.ts';
+import { supabaseRepo } from './repo.ts';
+import { confirmCandidate, getNote, listNotes, pasteConversation, type Decision, type IngestDeps } from './ingest.ts';
+import * as ai from './ai.ts';
+
+const repo = supabaseRepo();
+/** 실제 저장소·AI·설정을 묶은 ingest 의존성 (요청마다 설정을 새로 읽는다) */
+async function ingestDeps(): Promise<IngestDeps> {
+  const c = await config(['ai_model', 'slots', 'mask_enabled']);
+  const opts = { model: c.ai_model as string };
+  return {
+    repo,
+    ai: {
+      matchConcept: (cand, existing) => ai.matchConcept(cand, existing, opts),
+      mergeNote: (o, a) => ai.mergeNote(o, a, opts),
+      compareQuestion: (a, b) => ai.compareQuestion(a, b, opts),
+      extractCandidates: (t) => ai.extractCandidates(t, opts),
+    },
+    now: () => new Date(),
+    config: { mask_enabled: !!c.mask_enabled, slots: c.slots },
+  };
+}
 
 
 function validName(v: unknown) {
@@ -111,6 +132,38 @@ export async function route(req: Request): Promise<Response> {
       return json({ terms: rows });
     }
   }
+
+  if (m === 'GET' && path === '/inbox') return json({ candidates: await repo.listPendingCandidates() });
+
+  const confirmM = path.match(/^\/inbox\/([^/]+)\/confirm$/);
+  if (m === 'POST' && confirmM) {
+    const b = await body();
+    if (!['merge', 'new', 'pair', 'discard'].includes(b.action)) throw new HttpError(400, 'action이 올바르지 않아요');
+    const decision: Decision = { action: b.action, target_id: b.target_id || undefined, field_id: b.field_id || undefined };
+    await confirmCandidate(await ingestDeps(), confirmM[1], decision);
+    return json({ ok: true });
+  }
+
+  if (m === 'POST' && path === '/paste') {
+    const b = await body();
+    const text = String(b.text ?? '').trim();
+    if (!text) throw new HttpError(400, '붙여넣은 대화가 비어 있어요');
+    return json(await pasteConversation(await ingestDeps(), text));
+  }
+
+  if (path === '/fields') {
+    if (m === 'GET') return json({ fields: await repo.listFields() });
+    if (m === 'POST') {
+      const name = validName((await body()).name);
+      return json(await repo.findFieldByName(name) ?? await repo.insertField(name));
+    }
+  }
+
+  if (m === 'GET' && path === '/notes') {
+    return json({ notes: await listNotes(repo, url.searchParams.get('q') ?? '', url.searchParams.get('field') || null) });
+  }
+  const noteM = path.match(/^\/notes\/([^/]+)$/);
+  if (m === 'GET' && noteM) return json(await getNote(repo, noteM[1]));
 
   throw new HttpError(404, '없는 경로예요');
 }
