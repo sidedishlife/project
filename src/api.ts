@@ -8,7 +8,7 @@ export interface Card {
 }
 export interface Expression { en: string; alts: string[]; note_ko: string; words: Word[]; model: string }
 export interface User { id: string; name: string; is_admin: boolean }
-export interface Stats { xp: number; streak: number; last_study_day: string | null; best_combo: number; pet_name: string }
+export interface Stats { xp: number; streak: number; last_study_day: string | null; best_combo: number; pet_name: string; day: any }
 export type Grade = 'again' | 'hard' | 'good';
 
 const TOKEN_KEY = 'study.token';
