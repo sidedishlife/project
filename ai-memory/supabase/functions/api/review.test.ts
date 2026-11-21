@@ -1,6 +1,6 @@
 import { assert, assertEquals, assertRejects } from 'jsr:@std/assert@1';
 import { memoryRepo, type MemoryRepo } from './repo.ts';
-import { reveal, submitGrade, todayCount, todayQueue, todayResponse, type ReviewDeps } from './review.ts';
+import { reveal, submitGrade, todayAvailable, todayCount, todayQueue, todayResponse, type ReviewDeps } from './review.ts';
 import { HttpError } from './http.ts';
 
 // 2026-11-21 12:00 서울
@@ -178,4 +178,57 @@ Deno.test('daily_goal이 NaN이면 5로', async () => {
   const { repo, deps } = setup(NaN);
   for (let i = 0; i < 7; i++) await addConcept(repo, `c${i}`, `2026-11-20T0${i}:00:00Z`);
   assertEquals((await todayResponse(NOW, deps)).items.length, 5);
+});
+
+const logReview = (repo: MemoryRepo, unit_id: string, at: string) =>
+  repo.insertReviewLog({ unit_type: 'concept', unit_id, grade: 'good', mode: 'quick', answer: null, feedback: null, at });
+
+Deno.test('하루 목표는 서울 하루 기준: 오늘 5개 이미 복습했으면 0개 출제, 8개는 여전히 due', async () => {
+  const { repo, deps } = setup(5);
+  for (let i = 0; i < 8; i++) await addConcept(repo, `due${i}`, `2026-11-20T0${i}:00:00Z`);
+  for (let i = 0; i < 5; i++) await logReview(repo, `done${i}`, `2026-11-21T0${i}:00:00Z`); // 서울 오늘 09~13시
+  const r = await todayResponse(NOW, deps);
+  assertEquals(r.items.length, 0);
+  assertEquals(r.remaining_after, 8);
+  assertEquals((await todayQueue(NOW, deps)).length, 0);
+  assertEquals(await todayAvailable(NOW, deps), 0);
+});
+
+Deno.test('같은 항목을 오늘 여러 번 채점해도 1로 센다, 어제 기록은 세지 않는다', async () => {
+  const { repo, deps } = setup(5);
+  for (let i = 0; i < 8; i++) await addConcept(repo, `due${i}`, `2026-11-20T0${i}:00:00Z`);
+  await logReview(repo, 'x', '2026-11-21T01:00:00Z');
+  await logReview(repo, 'x', '2026-11-21T02:00:00Z');
+  await logReview(repo, 'y', '2026-11-20T14:59:00Z'); // 서울 어제 23:59
+  const r = await todayResponse(NOW, deps);
+  assertEquals(r.items.length, 4);
+  assertEquals(r.remaining_after, 4);
+  assertEquals(await todayAvailable(NOW, deps), 4);
+});
+
+Deno.test('todayAvailable = min(오늘 due, 남은 칸)', async () => {
+  const { repo, deps } = setup(5);
+  await addConcept(repo, 'a', '2026-11-20T00:00:00Z');
+  await addConcept(repo, 'b', '2026-11-20T01:00:00Z');
+  assertEquals(await todayAvailable(NOW, deps), 2);
+});
+
+Deno.test('deep: 가리기 켜짐이면 AI에는 가린 답, review_log에는 원문', async () => {
+  let seen = '';
+  const { repo, deps } = setup(5, async (_q, _n, a) => { seen = a; return { grade: 'good' as const, hit: [], missed: [], comment: '' }; });
+  deps.config.mask_enabled = true;
+  repo.data.mask.push({ term: 'A사', alias: '발주처1' });
+  const c = await addConcept(repo, 'a', '2026-11-20T00:00:00Z', 3, ['q']);
+  await submitGrade(deps, { unit_type: 'concept', unit_id: c.id, mode: 'deep', answer: 'A사 계약' });
+  assertEquals(seen, '발주처1 계약');
+  assertEquals(repo.data.reviewLog[0].answer, 'A사 계약');
+});
+
+Deno.test('deep: 가리기 꺼짐이면 그대로 전달', async () => {
+  let seen = '';
+  const { repo, deps } = setup(5, async (_q, _n, a) => { seen = a; return null; });
+  repo.data.mask.push({ term: 'A사', alias: '발주처1' });
+  const c = await addConcept(repo, 'a', '2026-11-20T00:00:00Z', 3, ['q']);
+  await submitGrade(deps, { unit_type: 'concept', unit_id: c.id, mode: 'deep', answer: 'A사 계약' });
+  assertEquals(seen, 'A사 계약');
 });

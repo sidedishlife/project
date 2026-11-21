@@ -18,7 +18,7 @@ export async function renderInbox(root: HTMLElement, notice = ''): Promise<void>
   const titles = new Map(notes.map((n) => [n.id, n.title]));
 
   root.replaceChildren(pasteBox((m) => void renderInbox(root, m).catch((e) => root.prepend(h('p', { class: 'error' }, errText(e))))));
-  if (notice) root.firstElementChild?.querySelector('[role=status]')!.append(notice);
+  if (notice) root.firstElementChild?.querySelector('[role=status]')!.append(notice); // 접힌 <details> 밖이라 새로고침 뒤에도 보인다
   const list = h('div', { class: 'cands' });
   root.append(list);
   const empty = () => { if (!list.querySelector('.cand')) list.replaceChildren(h('p', { class: 'empty' }, '받은함이 비었어요')); };
@@ -40,7 +40,7 @@ function pasteBox(onDone: (message: string) => void): HTMLElement {
       onDone(`후보 ${r.created}개를 받았어요`);
     } catch (e) { msg.textContent = errText(e); go.disabled = false; }
   });
-  return h('details', { class: 'paste' }, h('summary', {}, '대화 붙여넣기'), text, go, msg);
+  return h('div', { class: 'paste-wrap' }, h('details', { class: 'paste' }, h('summary', {}, '대화 붙여넣기'), text, go), msg);
 }
 
 function proposalView(p: Proposal, titles: Map<string, string>): HTMLElement {

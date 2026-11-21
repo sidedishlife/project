@@ -225,3 +225,15 @@ Deno.test('확정 중 실패하면 후보는 pending으로 돌아간다', async 
   await assertRejects(() => confirmCandidate(deps, id, { action: 'merge' }), HttpError); // target 없음 → 400
   assertEquals(repo.data.candidates[0].status, 'pending');
 });
+
+Deno.test('pasteConversation: 별칭이 다른 항목을 포함해도 두 번 가리지 않는다', async () => {
+  const terms = [{ term: 'A사', alias: '발주처B' }, { term: 'B', alias: 'X' }];
+  let sentToAi = '';
+  const { repo, deps } = setup({
+    extractCandidates: async (t) => { sentToAi = t; return [cand(1, { title: '발주처B 계약', note_md: '발주처B 노트' })]; },
+  }, true, terms);
+  await pasteConversation(deps, 'A사와 B 이야기');
+  assertEquals(sentToAi, '발주처B와 X 이야기'); // AI에는 한 번 가린 원문
+  assertEquals(repo.data.candidates[0].title, '발주처B 계약'); // 'B'→'X'로 다시 깨지지 않음
+  assertEquals(repo.data.candidates[0].note_md, '발주처B 노트');
+});

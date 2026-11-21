@@ -1,14 +1,15 @@
 // 복습 API: 오늘의 큐, 해설 공개, 채점·일정 갱신
 import { HttpError } from './http.ts';
 import type { Repo, UnitType } from './repo.ts';
-import { schedule, seoulDayEnd, type Grade } from './srs.ts';
+import { applyMask } from './masking.ts';
+import { schedule, seoulDayEnd, seoulDayStart, type Grade } from './srs.ts';
 import type { gradeAnswer } from './ai.ts';
 
 export interface ReviewDeps {
   repo: Repo;
   ai: { gradeAnswer: (question: string, note_md: string, answer: string) => ReturnType<typeof gradeAnswer> };
   now: () => Date;
-  config: { daily_goal: number };
+  config: { daily_goal: number; mask_enabled?: boolean };
 }
 
 /** 노트는 포함하지 않는다(해설은 답을 시도한 뒤 reveal로만). */
@@ -76,21 +77,33 @@ async function buildItems(d: ReviewDeps, entries: Entry[]): Promise<ReviewItem[]
 const goalOf = (d: ReviewDeps) => (Number.isFinite(d.config.daily_goal) ? Math.max(0, d.config.daily_goal) : 5);
 const nextDayEnd = (end: Date) => seoulDayEnd(new Date(end.getTime() + DAY));
 
+/** 오늘 남은 출제 칸 수: 하루 목표 − 오늘(서울) 이미 복습한 서로 다른 항목 수 */
+async function slotsLeft(now: Date, d: ReviewDeps): Promise<number> {
+  const reviewed = await d.repo.countReviewedSince(seoulDayStart(now));
+  return Math.max(0, goalOf(d) - reviewed);
+}
+
+/** 오늘(서울) 실제로 낼 수 있는 개수 = min(오늘 due, 남은 칸). 화면과 알림이 같은 값을 쓴다. */
+export async function todayAvailable(now: Date, d: ReviewDeps): Promise<number> {
+  const due = await dueEntries(d.repo, seoulDayEnd(now));
+  return Math.min(due.length, await slotsLeft(now, d));
+}
+
 /** due를 한 번만 읽어 오늘 큐·남은 개수·내일 개수를 모두 계산 */
 export async function todayResponse(now: Date, d: ReviewDeps) {
   const end = seoulDayEnd(now);
   const all = await dueEntries(d.repo, nextDayEnd(end));
   const today = all.filter((e) => new Date(e.due) <= end);
-  const items = await buildItems(d, today.slice(0, goalOf(d)));
+  const items = await buildItems(d, today.slice(0, await slotsLeft(now, d)));
   return { items, remaining_after: Math.max(0, today.length - items.length), tomorrow: all.length - today.length };
 }
 
 export async function todayQueue(now: Date, d: ReviewDeps): Promise<ReviewItem[]> {
-  const entries = (await dueEntries(d.repo, seoulDayEnd(now))).slice(0, goalOf(d));
+  const entries = (await dueEntries(d.repo, seoulDayEnd(now))).slice(0, await slotsLeft(now, d));
   return await buildItems(d, entries);
 }
 
-/** 오늘(서울) 끝까지 복습할 전체 개수 (하루 목표로 자르지 않음) */
+/** 오늘(서울) 끝까지 due인 전체 개수 (하루 목표로 자르지 않음) */
 export async function todayCount(now: Date, d: ReviewDeps): Promise<number> {
   return (await dueEntries(d.repo, seoulDayEnd(now))).length;
 }
@@ -146,7 +159,9 @@ export async function submitGrade(d: ReviewDeps, item: GradeInput): Promise<Grad
   let grade: Grade;
   let feedback: GradeFeedback | null = null;
   if (item.mode === 'deep' && !item.grade) {
-    const r = await d.ai.gradeAnswer(question, note, answer);
+    // 가리기가 켜져 있으면 답도 AI로 보내기 전에 가린다 (review_log에는 원문 그대로 — 내 DB 안)
+    const terms = d.config.mask_enabled ? await d.repo.maskTerms() : null;
+    const r = await d.ai.gradeAnswer(question, note, terms ? applyMask(answer, terms) : answer);
     if (!r) return { grade: null, feedback: null, next_due: null }; // 클라이언트가 자기채점으로 다시 보냄
     grade = r.grade;
     feedback = { hit: r.hit, missed: r.missed, comment: r.comment };

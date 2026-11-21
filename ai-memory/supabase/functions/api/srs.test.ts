@@ -1,5 +1,5 @@
 import { assertEquals } from 'jsr:@std/assert@1';
-import { firstDue, INTERVALS_DAYS, MASTERED, onMerge, schedule, seoulDayEnd, type Slots } from './srs.ts';
+import { firstDue, INTERVALS_DAYS, MASTERED, onMerge, schedule, seoulDayEnd, seoulDayStart, type Slots } from './srs.ts';
 
 const T = new Date('2026-11-21T03:00:00Z');
 const HOUR = 3600_000;
@@ -45,4 +45,11 @@ Deno.test('onMerge: 10일 뒤 due → 1일 뒤로 당김, 3시간 뒤 due는 그
   assertEquals(onMerge(far, T).getTime(), T.getTime() + 24 * HOUR);
   const near = new Date(T.getTime() + 3 * HOUR);
   assertEquals(onMerge(near, T).getTime(), near.getTime());
+});
+
+Deno.test('seoulDayStart: 서울 00:00:00.000', () => {
+  assertEquals(seoulDayStart(new Date('2026-11-21T03:00:00Z')).toISOString(), '2026-11-20T15:00:00.000Z');
+  // 서울 23:50 / 00:10 은 서로 다른 날
+  assertEquals(seoulDayStart(new Date('2026-11-21T14:50:00Z')).toISOString(), '2026-11-20T15:00:00.000Z');
+  assertEquals(seoulDayStart(new Date('2026-11-21T15:10:00Z')).toISOString(), '2026-11-21T15:00:00.000Z');
 });

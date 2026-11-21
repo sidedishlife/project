@@ -1,6 +1,6 @@
 // AI 기억장 서버. 모든 데이터 접근은 이 함수를 거친다(service role, 바깥 직접 접근은 RLS로 막혀 있음).
 // 주소: https://<project>.supabase.co/functions/v1/api/<경로>
-import { db, config, setConfig } from './db.ts';
+import { db, config, setConfig, dbErrorToHttp } from './db.ts';
 import { CORS, HttpError, json } from './http.ts';
 import { hashPassword, newSession, pbkdf2, requireUser, verifyPassword } from './auth.ts';
 import { validateConfigPatch } from './config.ts';
@@ -11,7 +11,7 @@ import { handleMcpRequest, safeEqual } from './mcp.ts';
 import { generateVapidKeys, initPush, sendPush, type Sub } from './push.ts';
 import { remind } from './remind.ts';
 import { submitCandidates } from './ingest.ts';
-import { reveal, submitGrade, todayCount, todayResponse, type ReviewDeps } from './review.ts';
+import { reveal, submitGrade, todayAvailable, todayResponse, type ReviewDeps } from './review.ts';
 
 const repo = supabaseRepo();
 /** 실제 저장소·AI·설정을 묶은 ingest 의존성 (요청마다 설정을 새로 읽는다) */
@@ -32,19 +32,19 @@ async function ingestDeps(): Promise<IngestDeps> {
 }
 
 async function reviewDeps(): Promise<ReviewDeps> {
-  const c = await config(['ai_model', 'daily_goal']);
+  const c = await config(['ai_model', 'daily_goal', 'mask_enabled']);
   const opts = { model: c.ai_model as string };
   return {
     repo,
     ai: { gradeAnswer: (q, n, a) => ai.gradeAnswer(q, n, a, opts) },
     now: () => new Date(),
-    config: { daily_goal: Number(c.daily_goal) },
+    config: { daily_goal: Number(c.daily_goal), mask_enabled: !!c.mask_enabled },
   };
 }
 
 async function loadSubs(): Promise<Sub[]> {
   const { data, error } = await db.from('push_subscriptions').select('endpoint, keys');
-  if (error) throw new HttpError(500, error.message);
+  if (error) throw dbErrorToHttp(error);
   return (data ?? []) as Sub[];
 }
 
@@ -86,6 +86,11 @@ async function publicConfig() {
   };
 }
 
+/** 경로 조각 디코딩. 잘못된 퍼센트 인코딩이면 null */
+function safeDecode(s: string): string | null {
+  try { return decodeURIComponent(s); } catch { return null; }
+}
+
 export async function route(req: Request): Promise<Response> {
   const url = new URL(req.url);
   // /functions/v1/api/xxx 또는 /api/xxx 모두 처리
@@ -103,11 +108,11 @@ export async function route(req: Request): Promise<Response> {
     const b = await body();
     const name = validName(b.name), password = validPassword(b.password);
     const { count, error: cErr } = await db.from('users').select('id', { count: 'exact', head: true });
-    if (cErr) throw new HttpError(500, cErr.message);
+    if (cErr) throw dbErrorToHttp(cErr);
     if ((count ?? 0) > 0) throw new HttpError(409, '이미 설정이 끝났어요. 로그인해 주세요');
     const { data, error } = await db.from('users').insert({ name, password_hash: await hashPassword(password) }).select('id, name').single();
     // 동시에 두 번 불려도 DB의 유니크 인덱스(users_single)가 한 명만 허용
-    if (error) throw new HttpError(error.code === '23505' ? 409 : 500, error.code === '23505' ? '이미 설정이 끝났어요. 로그인해 주세요' : error.message);
+    if (error) throw error.code === '23505' ? new HttpError(409, '이미 설정이 끝났어요. 로그인해 주세요') : dbErrorToHttp(error);
     return json({ token: await newSession(data.id), user: data });
   }
 
@@ -115,7 +120,7 @@ export async function route(req: Request): Promise<Response> {
     const b = await body();
     const name = validName(b.name);
     const { data, error } = await db.from('users').select('id, name, password_hash').eq('name', name).maybeSingle();
-    if (error) throw new HttpError(500, error.message);
+    if (error) throw dbErrorToHttp(error);
     // 이름이 없을 때도 같은 시간·같은 메시지 (이름 존재 여부를 알려주지 않음)
     const ok = data ? await verifyPassword(String(b.password ?? ''), data.password_hash) : (await pbkdf2('x', new Uint8Array(16), 100_000), false);
     if (!ok || !data) throw new HttpError(401, '이름 또는 비밀번호가 맞지 않아요');
@@ -125,8 +130,10 @@ export async function route(req: Request): Promise<Response> {
   // MCP: 앱 로그인 없이 경로의 비밀값이 인증 (requireUser보다 먼저)
   const mcpM = path.match(/^\/mcp\/([^/]+)$/);
   if (mcpM) {
+    const secret = safeDecode(mcpM[1]);
+    if (secret === null) throw new HttpError(404, '없는 경로예요'); // 잘못된 인코딩은 틀린 비밀값과 같게 처리
     const { mcp_secret } = await config(['mcp_secret']);
-    return await handleMcpRequest(req, decodeURIComponent(mcpM[1]), typeof mcp_secret === 'string' ? mcp_secret : null,
+    return await handleMcpRequest(req, secret, typeof mcp_secret === 'string' ? mcp_secret : null,
       async (source, items) => submitCandidates(await ingestDeps(), source, items));
   }
 
@@ -141,7 +148,7 @@ export async function route(req: Request): Promise<Response> {
     const rd = await reviewDeps();
     return json(await remind(new Date(), {
       slots,
-      count: () => todayCount(new Date(), rd),
+      count: () => todayAvailable(new Date(), rd),
       subs: loadSubs,
       send: sendPush,
       remove: async (endpoint) => { await db.from('push_subscriptions').delete().eq('endpoint', endpoint); },
@@ -169,7 +176,7 @@ export async function route(req: Request): Promise<Response> {
   if (path === '/mask-terms') {
     if (m === 'GET') {
       const { data, error } = await db.from('mask_terms').select('term, alias').order('term');
-      if (error) throw new HttpError(500, error.message);
+      if (error) throw dbErrorToHttp(error);
       return json({ terms: data ?? [] });
     }
     if (m === 'PUT') { // 목록 통째 교체
@@ -185,7 +192,7 @@ export async function route(req: Request): Promise<Response> {
         rows.push({ term, alias });
       }
       const { error } = await db.rpc('replace_mask_terms', { terms: rows }); // 삭제+삽입을 한 트랜잭션으로
-      if (error) throw new HttpError(500, error.message);
+      if (error) throw dbErrorToHttp(error);
       return json({ terms: rows });
     }
   }
@@ -199,14 +206,14 @@ export async function route(req: Request): Promise<Response> {
       const keys = b.keys;
       if (!endpoint.startsWith('https://') || !keys?.p256dh || !keys?.auth) throw new HttpError(400, '구독 정보가 올바르지 않아요');
       const { error } = await db.from('push_subscriptions').upsert({ endpoint, keys: { p256dh: String(keys.p256dh), auth: String(keys.auth) } }, { onConflict: 'endpoint' });
-      if (error) throw new HttpError(500, error.message);
+      if (error) throw dbErrorToHttp(error);
       return json({ ok: true });
     }
     if (m === 'DELETE') {
       const endpoint = url.searchParams.get('endpoint');
       if (!endpoint) throw new HttpError(400, 'endpoint가 필요해요');
       const { error } = await db.from('push_subscriptions').delete().eq('endpoint', endpoint);
-      if (error) throw new HttpError(500, error.message);
+      if (error) throw dbErrorToHttp(error);
       return json({ ok: true });
     }
   }
@@ -264,7 +271,11 @@ export async function route(req: Request): Promise<Response> {
     return json(await todayResponse(now, await reviewDeps()));
   }
   const revealM = path.match(/^\/review\/([^/]+)\/([^/]+)\/reveal$/);
-  if (m === 'GET' && revealM) return json(await reveal(await reviewDeps(), revealM[1], decodeURIComponent(revealM[2])));
+  if (m === 'GET' && revealM) {
+    const uid = safeDecode(revealM[2]);
+    if (uid === null) throw new HttpError(404, '없는 경로예요');
+    return json(await reveal(await reviewDeps(), revealM[1], uid));
+  }
   if (m === 'POST' && path === '/review/grade') {
     const b = await body();
     return json(await submitGrade(await reviewDeps(), {

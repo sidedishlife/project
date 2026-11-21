@@ -35,10 +35,11 @@ export async function submitCandidates(
   d: IngestDeps,
   source: 'claude' | 'chatgpt' | 'paste',
   items: CandidateInput[],
+  opts: { alreadyMasked?: boolean } = {},
 ): Promise<{ created: number; skipped_duplicates: number; over_limit: number }> {
   const kept = items.slice(0, MAX_PER_SUBMIT);
   const over_limit = items.length - kept.length;
-  const terms = await maskedTerms(d);
+  const terms = opts.alreadyMasked ? null : await maskedTerms(d); // 붙여넣기는 AI 호출 전에 이미 가려져 있음
   const now = d.now();
   const since = new Date(now.getTime() - DAY);
   let existing: { id: string; title: string; summary: string; note_md: string }[] | null = null;
@@ -80,7 +81,8 @@ export async function pasteConversation(d: IngestDeps, text: string): Promise<{ 
   const terms = await maskedTerms(d); // 대화 원문도 AI로 보내기 전에 가린다
   const found = await d.ai.extractCandidates(terms ? applyMask(text, terms) : text);
   if (found === null) throw new HttpError(502, 'AI가 대화를 정리하지 못했어요. 잠시 뒤 다시 시도해 주세요');
-  const r = await submitCandidates(d, 'paste', found);
+  // 추출 결과는 가려진 원문에서 나온 것이므로 다시 가리지 않는다(별칭 안에 다른 항목이 있어도 깨지지 않게)
+  const r = await submitCandidates(d, 'paste', found, { alreadyMasked: true });
   return { created: r.created };
 }
 

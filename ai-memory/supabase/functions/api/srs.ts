@@ -42,6 +42,11 @@ function seoulToDate(y: number, m: number, d: number, hh: number, mm: number, ss
   return new Date(guess - (asSeoul - guess));
 }
 
+export function seoulDayStart(now: Date): Date {
+  const { y, m, d } = seoulParts(now);
+  return seoulToDate(y, m, d, 0, 0, 0, 0);
+}
+
 export function seoulDayEnd(now: Date): Date {
   const { y, m, d } = seoulParts(now);
   return seoulToDate(y, m, d, 23, 59, 59, 999);

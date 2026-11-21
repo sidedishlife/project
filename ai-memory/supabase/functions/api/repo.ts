@@ -1,5 +1,5 @@
 // 데이터 접근 경계: ingest(와 이후 작업)는 이 인터페이스만 본다. Supabase 구현 + 테스트용 메모리 구현.
-import { db } from './db.ts';
+import { db, dbErrorToHttp, warnMissingEnv } from './db.ts';
 import { HttpError } from './http.ts';
 import type { MaskTerm } from './masking.ts';
 
@@ -59,6 +59,8 @@ export interface Repo {
   updateSrs(unit_type: UnitType, id: string, patch: SrsPatch): Promise<void>;
   touchQuestion(id: string, at: string): Promise<void>;
   insertReviewLog(row: ReviewLogInput): Promise<void>;
+  /** since 이후 복습 기록에서 서로 다른 (unit_type, unit_id)의 수 */
+  countReviewedSince(since: Date): Promise<number>;
   // fields
   listFields(): Promise<FieldRow[]>;
   findFieldByName(name: string): Promise<FieldRow | null>;
@@ -67,12 +69,14 @@ export interface Repo {
 
 // ── Supabase 구현 ──
 // deno-lint-ignore no-explicit-any
+const dbError = dbErrorToHttp;
 const ok = <T>(r: { data: T; error: any }): T => {
-  if (r.error) throw new HttpError(500, r.error.message);
+  if (r.error) throw dbError(r.error);
   return r.data;
 };
 
 export function supabaseRepo(): Repo {
+  warnMissingEnv();
   const summary = 'id, title, field_id, updated_at, stage, due_at';
   return {
     async maskTerms() {
@@ -81,7 +85,7 @@ export function supabaseRepo(): Repo {
     async hasCandidateHashSince(hash, since) {
       const { count, error } = await db.from('candidates').select('id', { count: 'exact', head: true })
         .eq('content_hash', hash).gte('created_at', since.toISOString());
-      if (error) throw new HttpError(500, error.message);
+      if (error) throw dbError(error);
       return (count ?? 0) > 0;
     },
     async insertCandidateIfNew(c, since) {
@@ -157,6 +161,10 @@ export function supabaseRepo(): Repo {
     async insertReviewLog(row) {
       ok(await db.from('review_log').insert(row));
     },
+    async countReviewedSince(since) {
+      const rows = (ok(await db.from('review_log').select('unit_type, unit_id').gte('at', since.toISOString())) ?? []) as { unit_type: string; unit_id: string }[];
+      return new Set(rows.map((r) => `${r.unit_type}:${r.unit_id}`)).size;
+    },
     async listFields() {
       return (ok(await db.from('fields').select('id, name').order('name')) ?? []) as FieldRow[];
     },
@@ -170,7 +178,7 @@ export function supabaseRepo(): Repo {
           const f = await this.findFieldByName(name);
           if (f) return f;
         }
-        throw new HttpError(500, error.message);
+        throw dbError(error);
       }
       return data as FieldRow;
     },
@@ -238,6 +246,8 @@ export function memoryRepo(seed: { mask?: MaskTerm[] } = {}): MemoryRepo {
     },
     touchQuestion: async (id, at) => { data.questions.find((q) => q.id === id)!.last_asked_at = at; },
     insertReviewLog: async (row) => { data.reviewLog.push(clone(row)); },
+    countReviewedSince: async (since) =>
+      new Set(data.reviewLog.filter((r) => new Date(r.at) >= since).map((r) => `${r.unit_type}:${r.unit_id}`)).size,
     searchNotes: async (q, field_id) => {
       const s = q.trim().toLowerCase();
       return data.concepts

@@ -10,10 +10,28 @@ export const db = createClient(
   { auth: { persistSession: false } },
 );
 
+let envWarned = false;
+/** 환경변수가 빠져 있으면 한 번만 분명하게 알린다 (첫 사용 때) */
+export function warnMissingEnv(): void {
+  if (envWarned) return;
+  envWarned = true;
+  const missing = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'].filter((k) => !Deno.env.get(k));
+  if (missing.length) {
+    console.error(`환경변수가 없어요: ${missing.join(', ')} — Missing required environment variable(s): ${missing.join(', ')}. Set them in the Supabase function secrets.`);
+  }
+}
+
+export function dbErrorToHttp(error: { code?: string; message?: string }): HttpError {
+  if (error?.code === '22P02') return new HttpError(404, '찾을 수 없어요');
+  console.error('DB error', error);
+  return new HttpError(500, '서버에서 문제가 생겼어요');
+}
+
 // deno-lint-ignore no-explicit-any
 export async function config<K extends string>(keys: K[]): Promise<Record<K, any>> {
+  warnMissingEnv();
   const { data, error } = await db.from('app_config').select('key, value').in('key', keys);
-  if (error) throw new HttpError(500, error.message);
+  if (error) throw dbErrorToHttp(error);
   // deno-lint-ignore no-explicit-any
   const rows = Object.fromEntries((data ?? []).map((r: any) => [r.key, r.value]));
   const all = withDefaults(rows); // 기본값이 있는 키는 저장 전에도 기본값으로 돌려줌
@@ -22,5 +40,5 @@ export async function config<K extends string>(keys: K[]): Promise<Record<K, any
 
 export async function setConfig(key: string, value: unknown): Promise<void> {
   const { error } = await db.from('app_config').upsert({ key, value }, { onConflict: 'key' });
-  if (error) throw new HttpError(500, error.message);
+  if (error) throw dbErrorToHttp(error);
 }

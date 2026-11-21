@@ -13,7 +13,7 @@ self.addEventListener('push', (e) => {
   e.waitUntil(self.registration.showNotification(p.title || 'AI 기억장', {
     body: p.body || '',
     icon: './icon-192.png',
-    data: { url: (p.data && p.data.url) || './' },
+    data: { url: p.url || (p.data && p.data.url) || './' },
   }));
 });
 
