@@ -1,4 +1,5 @@
-import { ttsCap, dictationCap } from './platform';
+import { ttsCap, dictationCap, inArtifact } from './platform';
+import { geminiVoiceReady, playVoice, stopVoice, TTSError } from './gemini-tts';
 
 // ───────────────────────── 음성 출력(TTS) ─────────────────────────
 // '자동'이면: claude.ai의 Claude 음성(이 화면 전용으로 만들어진 소리)이 있으면 그것부터,
@@ -55,7 +56,8 @@ export function englishVoices(): { name: string; lang: string; local: boolean }[
 }
 export const currentVoiceName = () => voiceName;
 
-export type Engine = 'browser' | 'claude' | 'none';
+export type Engine = 'gemini' | 'browser' | 'claude' | 'none';
+let geminiBlocked = false; // Gemini 음성 무료 한도를 다 쓰면 오늘은 휴대폰 음성으로
 export type VoicePref = 'auto' | 'claude' | 'device';
 let pref: VoicePref = 'auto';
 export const setVoicePref = (p: VoicePref) => { pref = p; failStreak = 0; };
@@ -63,6 +65,7 @@ export const claudeVoiceAvailable = () => !!tts;
 
 /** 지금 쓸 엔진 */
 export function speechEngine(): Engine {
+  if (!inArtifact && geminiVoiceReady() && !geminiBlocked) return 'gemini';
   const device = hasSynth() && failStreak < 2;
   if (pref === 'device') return hasSynth() ? 'browser' : tts ? 'claude' : 'none';
   if (tts) return 'claude'; // 자동·Claude: Claude 음성이 있으면 우선
@@ -107,6 +110,22 @@ function speakWithClaude(text: string, rate: number): Promise<void> {
 
 export function speak(text: string, rate = 0.9): Promise<void> {
   const engine = speechEngine();
+  // 문장은 Gemini 음성 파일로 (무음 모드에서도 나옴). 단어 하나는 한도를 아끼려고 휴대폰 음성
+  if (engine === 'gemini' && text.trim().split(/\s+/).length >= 2) {
+    window.dispatchEvent(new CustomEvent('speech-start'));
+    return playVoice(text, rate)
+      .then(({ model }) => { diag.last = `Gemini 음성 재생 완료 (${model})`; diag.okCount++; })
+      .catch((e) => {
+        if (e instanceof TTSError && e.quota && !geminiBlocked) {
+          geminiBlocked = true;
+          window.dispatchEvent(new CustomEvent('gemini-voice-off'));
+        }
+        diag.last = `${e?.message ?? e} → 휴대폰 음성으로 읽음`;
+        diag.failCount++;
+        return speakWithDevice(text, rate);
+      })
+      .finally(() => window.dispatchEvent(new CustomEvent('speech-end')));
+  }
   if (engine === 'claude') return speakWithClaude(text, rate);
   if (engine === 'none') {
     diag.last = '이 화면에는 음성 기능이 없음';
@@ -187,6 +206,7 @@ function speakWithDevice(text: string, rate: number): Promise<void> {
 }
 
 export function stopSpeaking() {
+  stopVoice();
   if (hasSynth() && (speechSynthesis.speaking || speechSynthesis.pending)) speechSynthesis.cancel();
   tts?.stop?.();
 }

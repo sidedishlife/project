@@ -4,6 +4,7 @@ import { generateExpression, lookupWord, friendlyError, testGeminiKey, type Expr
 import { inArtifact, ttsCap, sampleCap, downloadsCap, remoteWrite, remoteLoadAll, onSync, hasUnsaved, type SyncState } from './platform';
 import { mergeCards, mergeStats } from './sync';
 import { icon } from './icons';
+import { setGeminiKey, prefetchVoice, unlockPlayer } from './gemini-tts';
 import { stickersBundled, localSticker, loadLocalStickers, setLocalSticker, clearLocalSticker } from './stickers';
 import { sticker, stickerRaw, STICKERS, GOLD_LEVEL, newlyUnlocked, type StickerName } from './stickers';
 import { schedule, isDue, newCardSchedule, formatDue, STAGE_LABELS, type Grade } from './srs';
@@ -26,6 +27,7 @@ if (settings.apiKey.startsWith('sk-ant')) settings = { ...settings, apiKey: '' }
 setSound(settings.sound);
 setVoicePref(settings.voice ?? 'auto');
 setVoiceName(settings.voiceName ?? '');
+setGeminiKey(inArtifact ? '' : settings.apiKey);
 let sync: SyncState = 'local';
 let loaded = false; // 계정 기록 불러오기 끝났는지
 onSync((st) => { sync = st; const el = document.getElementById('sync'); if (el) el.outerHTML = syncChip(); });
@@ -437,7 +439,7 @@ function soundStatusHTML() {
   const row = (k: string, v: string, bad = false) => `<div class="dg-row ${bad ? 'bad' : ''}"><span>${k}</span><b>${esc(v)}</b></div>`;
   return `<div class="sound-box ${ok ? '' : 'bad'}">
     <div class="dg">
-      ${row('지금 쓰는 음성', d.engine === 'claude' ? 'Claude 음성' : d.engine === 'browser' ? '휴대폰 음성' : '없음', d.engine === 'none')}
+      ${row('지금 쓰는 음성', d.engine === 'gemini' ? 'Gemini 음성 (무음 모드에서도 나옴)' : d.engine === 'claude' ? 'Claude 음성' : d.engine === 'browser' ? '휴대폰 음성' : '없음', d.engine === 'none')}
       ${row('기기 · 열린 곳', `${d.device} · ${d.place}`, d.place === '앱 안 화면')}
       ${row('영어 음성', d.synth ? `${d.enVoices}개 (전체 ${d.voices}개)` : '없음', !d.synth || d.enVoices === 0)}
       ${inArtifact ? row('Claude 음성', d.claude ? '사용 가능' : '이 화면에선 안 됨') : ''}
@@ -547,6 +549,7 @@ function saveSettingsFromForm() {
   };
   setSound(settings.sound);
   saveSettings(settings);
+  setGeminiKey(inArtifact ? '' : settings.apiKey);
   const nm = val('petname')?.value.trim();
   if (nm && nm !== pet()) { stats = { ...stats, petName: nm.slice(0, 10) }; putStats(); }
 }
@@ -965,6 +968,7 @@ document.addEventListener('click', async (e) => {
       render();
       try {
         ui.draft = await generateExpression(settings.apiKey, ko);
+        prefetchVoice(ui.draft.en);
         draftListens = 0;
         ui.busy = false;
         sfx('good');
@@ -1174,8 +1178,13 @@ document.addEventListener('click', async (e) => {
 loadLocalStickers().then(render);
 
 // 첫 터치 때 소리 잠금 해제 (모바일은 탭 안에서 한 번 소리를 깨워야 함)
-document.addEventListener('pointerdown', () => { unlockSpeech(); }, { capture: true });
-document.addEventListener('touchend', () => { unlockSpeech(); }, { capture: true });
+document.addEventListener('pointerdown', () => { unlockSpeech(); unlockPlayer(); }, { capture: true });
+document.addEventListener('touchend', () => { unlockSpeech(); unlockPlayer(); }, { capture: true });
+
+// Gemini 음성 한도가 없거나 다 쓰면 한 번 안내 (휴대폰 음성은 무음 모드에서 안 들릴 수 있음)
+window.addEventListener('gemini-voice-off', () => {
+  openSheet(`<div class="sheet-word">휴대폰 음성으로 바꿨어요</div><p class="hint">Gemini 음성 무료 한도를 다 썼거나, 이 키에서는 음성 만들기를 쓸 수 없어요. 오늘은 휴대폰 음성으로 읽어요.</p>${soundHelpHTML()}<button class="btn go xl" data-action="close-sheet">알겠어요</button>`);
+});
 
 // 영어 음성을 낼 수 없으면 한 번 안내
 let soundHelpShown = false;
