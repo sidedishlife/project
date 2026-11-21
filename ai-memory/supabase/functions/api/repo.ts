@@ -18,6 +18,17 @@ export interface FieldRow { id: string; name: string }
 export interface NoteSummary { id: string; title: string; field_id: string | null; updated_at: string; stage: number; due_at: string | null }
 export interface QuestionRow { id: string; concept_id: string; kind: string; prompt: string; last_asked_at: string | null }
 
+export interface PairRow {
+  id: string; concept_a: string; concept_b: string; question: string;
+  stage: number; due_at: string | null; reviews: number; lapses: number;
+}
+export type UnitType = 'concept' | 'pair';
+export interface SrsPatch { stage: number; reviews: number; lapses: number; due_at: string }
+export interface ReviewLogInput {
+  unit_type: UnitType; unit_id: string; grade: string; mode: 'quick' | 'deep';
+  answer: string | null; feedback: Record<string, unknown> | null; at: string;
+}
+
 export interface Repo {
   maskTerms(): Promise<MaskTerm[]>;
   // candidates
@@ -40,6 +51,14 @@ export interface Repo {
   listQuestions(concept_id: string): Promise<QuestionRow[]>;
   insertPair(p: { concept_a: string; concept_b: string; question: string; stage: number; due_at: string }): Promise<void>;
   searchNotes(q: string, field_id: string | null): Promise<NoteSummary[]>;
+  // review
+  /** due_at <= until 인 개념/짝 (due_at이 null이면 제외), due 오름차순 */
+  listDueConcepts(until: Date): Promise<ConceptRow[]>;
+  listDuePairs(until: Date): Promise<PairRow[]>;
+  getPair(id: string): Promise<PairRow | null>;
+  updateSrs(unit_type: UnitType, id: string, patch: SrsPatch): Promise<void>;
+  touchQuestion(id: string, at: string): Promise<void>;
+  insertReviewLog(row: ReviewLogInput): Promise<void>;
   // fields
   listFields(): Promise<FieldRow[]>;
   findFieldByName(name: string): Promise<FieldRow | null>;
@@ -120,6 +139,24 @@ export function supabaseRepo(): Repo {
       if (s) query = query.or(`title.ilike."%${s}%",note_md.ilike."%${s}%"`);
       return (ok(await query) ?? []) as NoteSummary[];
     },
+    async listDueConcepts(until) {
+      return (ok(await db.from('concepts').select('*').lte('due_at', until.toISOString()).order('due_at')) ?? []) as ConceptRow[];
+    },
+    async listDuePairs(until) {
+      return (ok(await db.from('pairs').select('*').lte('due_at', until.toISOString()).order('due_at')) ?? []) as PairRow[];
+    },
+    async getPair(id) {
+      return (ok(await db.from('pairs').select('*').eq('id', id).maybeSingle()) ?? null) as PairRow | null;
+    },
+    async updateSrs(unit_type, id, patch) {
+      ok(await db.from(unit_type === 'concept' ? 'concepts' : 'pairs').update(patch).eq('id', id));
+    },
+    async touchQuestion(id, at) {
+      ok(await db.from('questions').update({ last_asked_at: at }).eq('id', id));
+    },
+    async insertReviewLog(row) {
+      ok(await db.from('review_log').insert(row));
+    },
     async listFields() {
       return (ok(await db.from('fields').select('id, name').order('name')) ?? []) as FieldRow[];
     },
@@ -144,13 +181,14 @@ export function supabaseRepo(): Repo {
 export interface MemoryRepo extends Repo {
   data: {
     concepts: ConceptRow[]; versions: { id: string; concept_id: string; note_md: string; created_at: string }[];
-    questions: QuestionRow[]; pairs: { concept_a: string; concept_b: string; question: string; stage: number; due_at: string }[];
+    questions: QuestionRow[]; pairs: PairRow[];
+    reviewLog: ReviewLogInput[];
     candidates: CandidateRow[]; fields: FieldRow[]; mask: MaskTerm[];
   };
 }
 
 export function memoryRepo(seed: { mask?: MaskTerm[] } = {}): MemoryRepo {
-  const data: MemoryRepo['data'] = { concepts: [], versions: [], questions: [], pairs: [], candidates: [], fields: [], mask: seed.mask ?? [] };
+  const data: MemoryRepo['data'] = { concepts: [], versions: [], questions: [], pairs: [], reviewLog: [], candidates: [], fields: [], mask: seed.mask ?? [] };
   const uid = () => crypto.randomUUID();
   const clone = <T>(x: T): T => structuredClone(x);
   return {
@@ -189,7 +227,17 @@ export function memoryRepo(seed: { mask?: MaskTerm[] } = {}): MemoryRepo {
       for (const q of qs) data.questions.push({ id: uid(), concept_id, kind: q.kind, prompt: q.prompt, last_asked_at: null });
     },
     listQuestions: async (cid) => clone(data.questions.filter((q) => q.concept_id === cid)),
-    insertPair: async (p) => { data.pairs.push(clone(p)); },
+    insertPair: async (p) => { data.pairs.push({ id: uid(), reviews: 0, lapses: 0, ...clone(p) }); },
+    listDueConcepts: async (until) => clone(data.concepts.filter((c) => c.due_at && new Date(c.due_at) <= until)
+      .sort((a, b) => (a.due_at! < b.due_at! ? -1 : 1))),
+    listDuePairs: async (until) => clone(data.pairs.filter((p) => p.due_at && new Date(p.due_at) <= until)
+      .sort((a, b) => (a.due_at! < b.due_at! ? -1 : 1))),
+    getPair: async (id) => clone(data.pairs.find((p) => p.id === id) ?? null),
+    updateSrs: async (t, id, patch) => {
+      Object.assign((t === 'concept' ? data.concepts : data.pairs).find((x) => x.id === id)!, patch);
+    },
+    touchQuestion: async (id, at) => { data.questions.find((q) => q.id === id)!.last_asked_at = at; },
+    insertReviewLog: async (row) => { data.reviewLog.push(clone(row)); },
     searchNotes: async (q, field_id) => {
       const s = q.trim().toLowerCase();
       return data.concepts

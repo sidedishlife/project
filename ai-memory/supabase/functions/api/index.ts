@@ -9,6 +9,7 @@ import { confirmCandidate, getNote, listNotes, pasteConversation, type Decision,
 import * as ai from './ai.ts';
 import { handleMcpRequest } from './mcp.ts';
 import { submitCandidates } from './ingest.ts';
+import { reveal, submitGrade, todayResponse, type ReviewDeps } from './review.ts';
 
 const repo = supabaseRepo();
 /** 실제 저장소·AI·설정을 묶은 ingest 의존성 (요청마다 설정을 새로 읽는다) */
@@ -28,6 +29,16 @@ async function ingestDeps(): Promise<IngestDeps> {
   };
 }
 
+async function reviewDeps(): Promise<ReviewDeps> {
+  const c = await config(['ai_model', 'daily_goal']);
+  const opts = { model: c.ai_model as string };
+  return {
+    repo,
+    ai: { gradeAnswer: (q, n, a) => ai.gradeAnswer(q, n, a, opts) },
+    now: () => new Date(),
+    config: { daily_goal: Number(c.daily_goal) },
+  };
+}
 
 function validName(v: unknown) {
   const s = String(v ?? '').trim();
@@ -174,6 +185,23 @@ export async function route(req: Request): Promise<Response> {
   }
   const noteM = path.match(/^\/notes\/([^/]+)$/);
   if (m === 'GET' && noteM) return json(await getNote(repo, noteM[1]));
+
+  if (m === 'GET' && path === '/review/today') {
+    // ?now=ISO 는 화면 확인용(출제 목록만 바뀜). 채점 시각은 항상 실제 시각.
+    const nowQ = url.searchParams.get('now');
+    const now = nowQ ? new Date(nowQ) : new Date();
+    if (Number.isNaN(now.getTime())) throw new HttpError(400, 'now 형식이 올바르지 않아요');
+    return json(await todayResponse(now, await reviewDeps()));
+  }
+  const revealM = path.match(/^\/review\/([^/]+)\/([^/]+)\/reveal$/);
+  if (m === 'GET' && revealM) return json(await reveal(await reviewDeps(), revealM[1], decodeURIComponent(revealM[2])));
+  if (m === 'POST' && path === '/review/grade') {
+    const b = await body();
+    return json(await submitGrade(await reviewDeps(), {
+      unit_type: b.unit_type, unit_id: String(b.unit_id ?? ''), mode: b.mode,
+      grade: b.grade ?? undefined, answer: b.answer ?? undefined, question_id: b.question_id ?? null,
+    }));
+  }
 
   throw new HttpError(404, '없는 경로예요');
 }
