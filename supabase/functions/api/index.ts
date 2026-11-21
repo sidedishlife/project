@@ -1,7 +1,7 @@
 // Study 영어 앱 서버. 모든 데이터 접근은 이 함수를 거친다(관리자 권한, 바깥 직접 접근은 DB에서 막혀 있음).
 // 주소: https://<project>.supabase.co/functions/v1/api/<경로>
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { express, lookup, transcribe, speak, geminiKey, AiError, VOICE, listModels, probe, setModels } from './gemini.ts';
+import { express, lookup, transcribe, speak, geminiKey, AiError, VOICE, listModels, probe, setModels, image } from './gemini.ts';
 import { initPush, sendPush, type Sub } from './push.ts';
 import { schedule, firstDue, listensThisReview, FIRST_LISTENS, type Grade } from './srs.ts';
 
@@ -24,7 +24,7 @@ const json = (data: unknown, status = 200) =>
 
 // ───────────── 비밀번호·토큰 ─────────────
 const enc = new TextEncoder();
-const b64 = (u: Uint8Array) => btoa(String.fromCharCode(...u));
+const b64 = (u: Uint8Array) => { let s = ''; for (let i = 0; i < u.length; i += 8192) s += String.fromCharCode(...u.subarray(i, i + 8192)); return btoa(s); };
 const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 const hex = (buf: ArrayBuffer) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 
@@ -187,6 +187,24 @@ async function route(req: Request): Promise<Response> {
     const cfg = await config(['cron_secret', 'vapid_public', 'vapid_private']);
     if (!cfg.cron_secret || req.headers.get('x-cron-secret') !== cfg.cron_secret) throw new HttpError(403, '허용되지 않은 호출');
     return json(await remindAll(cfg));
+  }
+  // 관리자 도구: 게임 그림 만들기 (비밀값 필요). 결과는 저장소 art/ 에 저장
+  if (m === 'POST' && path === '/admin/image') {
+    const cfg = await config(['cron_secret']);
+    if (!cfg.cron_secret || req.headers.get('x-cron-secret') !== cfg.cron_secret) throw new HttpError(403, '허용되지 않은 호출');
+    const b = await body();
+    const name = String(b.name ?? '').replace(/[^a-z0-9_-]/gi, '').slice(0, 60) || `img-${Date.now()}`;
+    let ref: { data: string; mime: string } | undefined;
+    if (b.ref) { // 참고 그림: 저장소 art/ 안의 파일 이름
+      const { data: f } = await db.storage.from('audio').download(`art/${String(b.ref).replace(/[^a-z0-9_.-]/gi, '')}`);
+      if (f) ref = { data: b64(new Uint8Array(await f.arrayBuffer())), mime: f.type || 'image/png' };
+    }
+    const out = await image(String(b.model || 'gemini-3.1-flash-image'), String(b.prompt ?? ''), ref);
+    const ext = out.mime.includes('jpeg') ? 'jpg' : out.mime.includes('webp') ? 'webp' : 'png';
+    const p = `art/${name}.${ext}`;
+    const up = await db.storage.from('audio').upload(p, out.bytes, { contentType: out.mime, upsert: true });
+    if (up.error) throw new HttpError(500, up.error.message);
+    return json({ url: db.storage.from('audio').getPublicUrl(p).data.publicUrl, ms: out.ms, file: `${name}.${ext}` });
   }
   if (m === 'GET' && path === '/push/key') return json({ key: (await config(['vapid_public'])).vapid_public ?? '' });
 

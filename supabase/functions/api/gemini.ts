@@ -191,3 +191,22 @@ export async function speak(text: string) {
   const rate = Number(/rate=(\d+)/.exec(mime)?.[1]) || 24000;
   return { wav: pcmToWav(bytes, rate), model };
 }
+
+/** 그림 만들기 (관리자 도구): 모델 이름, 설명, 참고 그림(선택) → 그림 바이트 */
+export async function image(model: string, prompt: string, ref?: { data: string; mime: string }) {
+  const key = geminiKey();
+  const t0 = Date.now();
+  const res = await fetch(URL_FOR(model), {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
+    body: JSON.stringify({
+      contents: [{ parts: [...(ref ? [{ inlineData: { mimeType: ref.mime, data: ref.data } }] : []), { text: prompt }] }],
+      generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
+    }),
+    signal: AbortSignal.timeout(120_000),
+  }).catch((e) => { throw new AiError(504, `그림 모델 응답 없음 (${e?.name})`); });
+  const body: any = await res.json().catch(() => ({}));
+  if (!res.ok) throw new AiError(res.status, `${model} ${res.status}: ${body?.error?.message ?? ''}`.slice(0, 300));
+  const part = body?.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData?.data);
+  if (!part) throw new AiError(502, `그림이 비어 있어요: ${JSON.stringify(body?.candidates?.[0]?.content?.parts?.map((p: any) => p.text)).slice(0, 200)}`);
+  return { bytes: Uint8Array.from(atob(part.inlineData.data), (c) => c.charCodeAt(0)), mime: String(part.inlineData.mimeType || 'image/png'), ms: Date.now() - t0 };
+}
