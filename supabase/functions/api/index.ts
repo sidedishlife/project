@@ -2,6 +2,7 @@
 // 주소: https://<project>.supabase.co/functions/v1/api/<경로>
 import { createClient } from 'npm:@supabase/supabase-js@2';
 import { express, lookup, transcribe, speak, geminiKey, AiError, VOICE, listModels, probe, setModels } from './gemini.ts';
+import { initPush, sendPush, type Sub } from './push.ts';
 import { schedule, firstDue, listensThisReview, FIRST_LISTENS, type Grade } from './srs.ts';
 
 const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
@@ -102,6 +103,38 @@ async function getOwnCard(userId: string, id: string) {
 
 // ───────────── 경로 처리 ─────────────
 // 모델 순서 설정을 DB에서 읽음 (1분 캐시)
+async function config(keys: string[]): Promise<Record<string, string>> {
+  const { data } = await db.from('app_config').select('key, value').in('key', keys);
+  return Object.fromEntries((data ?? []).map((r) => [r.key, r.value]));
+}
+
+/** 복습할 카드가 있는 사람들(또는 한 사람)에게 알림 */
+async function remindAll(cfg: Record<string, string>, onlyUser?: string, force = false) {
+  if (!initPush(cfg.vapid_public, cfg.vapid_private)) throw new HttpError(500, '알림 열쇠가 설정되지 않았어요');
+  let q = db.from('push_subscriptions').select('id, user_id, endpoint, keys');
+  if (onlyUser) q = q.eq('user_id', onlyUser);
+  const { data: subs, error } = await q;
+  if (error) throw new HttpError(500, error.message);
+  const result = { users: 0, sent: 0, removed: 0, failed: [] as string[] };
+  const byUser = new Map<string, any[]>();
+  for (const s of subs ?? []) byUser.set(s.user_id, [...(byUser.get(s.user_id) ?? []), s]);
+  for (const [uid, list] of byUser) {
+    const { count } = await db.from('cards').select('id', { count: 'exact', head: true }).eq('user_id', uid).is('deleted_at', null).lte('due', new Date().toISOString());
+    if (!count && !force) continue;
+    result.users++;
+    const payload = count
+      ? { title: '복습할 시간이에요', body: `잊기 전에 복습할 카드가 ${count}장 있어요`, url: './' }
+      : { title: '알림 시험', body: '알림이 잘 와요. 지금은 복습할 카드가 없어요', url: './' };
+    for (const s of list) {
+      const r = await sendPush({ endpoint: s.endpoint, keys: s.keys }, payload);
+      if (r === 'ok') result.sent++;
+      else if (r === 'gone') { await db.from('push_subscriptions').delete().eq('id', s.id); result.removed++; }
+      else result.failed.push(r);
+    }
+  }
+  return result;
+}
+
 let modelConfigAt = 0;
 async function loadModelConfig() {
   if (Date.now() - modelConfigAt < 60_000) return;
@@ -149,7 +182,73 @@ async function route(req: Request): Promise<Response> {
   }
 
   // ── 여기부터 로그인 필요
+  // 매일 저녁 9시(DB 예약 작업)가 부름: 복습할 카드가 있는 사람에게 알림
+  if (m === 'POST' && path === '/cron/remind') {
+    const cfg = await config(['cron_secret', 'vapid_public', 'vapid_private']);
+    if (!cfg.cron_secret || req.headers.get('x-cron-secret') !== cfg.cron_secret) throw new HttpError(403, '허용되지 않은 호출');
+    return json(await remindAll(cfg));
+  }
+  if (m === 'GET' && path === '/push/key') return json({ key: (await config(['vapid_public'])).vapid_public ?? '' });
+
   const user = await requireUser(req);
+
+  // 알림 받기 등록/해제
+  if (path === '/push/subscribe') {
+    const b = await body();
+    if (m === 'POST') {
+      const sub = b.subscription as Sub;
+      if (!sub?.endpoint || !sub?.keys?.p256dh || !sub?.keys?.auth) throw new HttpError(400, '알림 등록 정보가 올바르지 않아요');
+      const { error } = await db.from('push_subscriptions').upsert({ user_id: user.id, endpoint: sub.endpoint, keys: sub.keys }, { onConflict: 'endpoint' });
+      if (error) throw new HttpError(500, error.message);
+      return json({ ok: true });
+    }
+    if (m === 'PUT') { // 해제 (DELETE는 본문을 못 읽는 환경이 있어 PUT 사용)
+      await db.from('push_subscriptions').delete().eq('user_id', user.id).eq('endpoint', String(b.endpoint ?? ''));
+      return json({ ok: true });
+    }
+  }
+  // 알림 시험: 지금 내 기기들로 보내 봄
+  if (m === 'POST' && path === '/push/test') {
+    const cfg = await config(['vapid_public', 'vapid_private']);
+    return json(await remindAll(cfg, user.id, true));
+  }
+
+  // 예전 앱 백업 가져오기: 같은 영어 문장은 건너뛰고, 기록(단계·복습 시각·들은 횟수)은 그대로 살림
+  if (m === 'POST' && path === '/import') {
+    const b = await body();
+    const list = Array.isArray(b.cards) ? b.cards.slice(0, 2000) : [];
+    const { data: mine } = await db.from('cards').select('en').eq('user_id', user.id).is('deleted_at', null);
+    const have = new Set((mine ?? []).map((c) => c.en.trim().toLowerCase()));
+    const num = (v: unknown, lo: number, hi: number, d: number) => { const n = Number(v); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.floor(n))) : d; };
+    const rows = [];
+    for (const c of list) {
+      const en = String(c?.en ?? '').trim(), ko = String(c?.ko ?? '').trim();
+      if (!en || !ko || have.has(en.toLowerCase())) continue;
+      have.add(en.toLowerCase());
+      const due = Number(c.due), created = Number(c.createdAt ?? c.created_at);
+      rows.push({
+        user_id: user.id, ko: ko.slice(0, 500), en: en.slice(0, 500), alts: asStrArray(c.alts, 3), note: String(c.note ?? '').slice(0, 1000), words: asWords(c.words),
+        stage: num(c.stage, 0, 7, 0), listens: num(c.listens, 0, 1000, 0), reviews: num(c.reviews, 0, 10000, 0), lapses: num(c.lapses, 0, 10000, 0),
+        due: new Date(Number.isFinite(due) && due > 0 ? due : firstDue()).toISOString(),
+        ...(Number.isFinite(created) && created > 0 ? { created_at: new Date(created).toISOString() } : {}),
+      });
+    }
+    if (rows.length) {
+      const { error } = await db.from('cards').insert(rows);
+      if (error) throw new HttpError(500, error.message);
+    }
+    // 경험치·연속일은 큰 값을 유지
+    const s = b.stats ?? {};
+    const { data: cur } = await db.from('stats').select('xp, streak, best_combo').eq('user_id', user.id).maybeSingle();
+    await db.from('stats').upsert({
+      user_id: user.id,
+      xp: Math.max(cur?.xp ?? 0, num(s.xp, 0, 1e9, 0)),
+      streak: Math.max(cur?.streak ?? 0, num(s.streak, 0, 10000, 0)),
+      best_combo: Math.max(cur?.best_combo ?? 0, num(s.bestCombo ?? s.best_combo, 0, 10000, 0)),
+      updated_at: new Date().toISOString(),
+    });
+    return json({ imported: rows.length, skipped: list.length - rows.length });
+  }
 
   if (m === 'GET' && path === '/me') return json({ user });
 
@@ -272,7 +371,8 @@ async function route(req: Request): Promise<Response> {
       if (!['again', 'hard', 'good'].includes(grade)) throw new HttpError(400, '채점 값이 올바르지 않아요');
       const next = schedule({ stage: card.stage, reviews: card.reviews, lapses: card.lapses }, grade);
       const listen_now = listensThisReview(card.listens, card.stage);
-      const updated = await save({ stage: next.stage, reviews: next.reviews, lapses: next.lapses, due: new Date(next.due).toISOString() });
+      const heard = Math.max(0, Math.min(Number(b.listened) || 0, 50)); // 이번 복습에서 들은 횟수 (한 번에 저장)
+      const updated = await save({ stage: next.stage, reviews: next.reviews, lapses: next.lapses, due: new Date(next.due).toISOString(), listens: card.listens + heard });
       return json({ card: updated, listen_now });
     }
     // 들은 횟수 더하기
