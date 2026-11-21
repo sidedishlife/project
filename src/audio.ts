@@ -39,10 +39,11 @@ export function voiceUrl(text: string): Promise<string> {
 /** 미리 만들어 두기 (실패해도 조용히) */
 export const prefetchVoice = (text: string) => { voiceUrl(text).catch(() => {}); };
 
-let rate = 1;
-try { rate = Number(localStorage.getItem('study.rate')) || 1; } catch { /* 무시 */ }
+// 기본 속도: 조금 빠르게(1.15배). 예전 저장값(study.rate)은 무시하고 새로 시작
+let rate = 1.15;
+try { rate = Number(localStorage.getItem('study.rate2')) || 1.15; } catch { /* 무시 */ }
 export const getRate = () => rate;
-export function setRate(r: number) { rate = r; player.playbackRate = r; try { localStorage.setItem('study.rate', String(r)); } catch { /* 무시 */ } }
+export function setRate(r: number) { rate = r; player.playbackRate = r; try { localStorage.setItem('study.rate2', String(r)); } catch { /* 무시 */ } }
 
 let session = 0; // 재생할 때마다 번호를 올려, 멈춘 재생이 뒤늦게 이어지지 않게 함
 

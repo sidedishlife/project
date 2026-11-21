@@ -61,3 +61,7 @@ nav button { flex: 1; border: 0; background: none; font-size: 14px; padding: 8px
 .sw { font-size: 22px; }
 .meaning { font-size: 18px; margin: 0; }
 .filebtn { display: block; text-align: center; border: 1px solid var(--line); border-radius: 10px; padding: 11px 14px; cursor: pointer; }
+.alt { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--line); padding-top: 6px; }
+.alt p { flex: 1; margin: 0; }
+.small { font-size: 12px; margin: 4px 0 0; }
+.rate { flex-wrap: wrap; }

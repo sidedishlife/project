@@ -5,7 +5,7 @@ import { api, ApiError, hasToken, setToken, setOnUnauthorized, type Card, type E
 import { unlockAudio, playTimes, stopAudio, prefetchVoice, getRate, setRate } from './audio';
 import { pushState, enablePush, disablePush } from './push';
 import { recordingSupported, startRecording, stopAndTranscribe, cancelRecording } from './recorder';
-import { listensThisReview, FIRST_LISTENS, LISTEN_TARGET, MASTERED_STAGE } from '../supabase/functions/api/srs';
+import { LISTEN_TARGET, MASTERED_STAGE } from '../supabase/functions/api/srs';
 
 const app = document.getElementById('app')!;
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
@@ -23,6 +23,10 @@ const create = { ko: '', result: null as Expression | null, heard: 0, saved: nul
 // 복습 화면
 const review = { queue: [] as Card[], i: 0, revealed: false, heard: 0, target: 0, playing: false, done: 0 };
 let detailId = '';
+// 반복 듣기 횟수 (기본 20번, 설정에서 변경)
+let repeat = 20;
+try { repeat = Number(localStorage.getItem('study.repeat')) || 20; } catch { /* 무시 */ }
+const REVIEW_AUTO = 3; // 복습 때 정답을 열면 자동으로 듣는 횟수
 let pushOn = false, pushCan = false, pushNote = '';
 async function refreshPush() {
   const st = await pushState();
@@ -123,7 +127,8 @@ function homeView() {
 
 function rateButtons() {
   const r = getRate();
-  return `<div class="rate">속도 <button data-rate="0.75" class="${r === 0.75 ? 'on' : ''}">느리게</button><button data-rate="1" class="${r === 1 ? 'on' : ''}">보통</button></div>`;
+  const opts: [number, string][] = [[0.9, '느리게'], [1, '보통'], [1.15, '조금 빠르게'], [1.3, '빠르게']];
+  return `<div class="rate">속도 ${opts.map(([v, l]) => `<button data-rate="${v}" class="${r === v ? 'on' : ''}">${l}</button>`).join('')}</div>`;
 }
 
 function createView() {
@@ -136,7 +141,7 @@ function createView() {
       <button class="primary" data-act="generate">영어로 만들기</button>
     </div>`;
   if (r) {
-    const target = FIRST_LISTENS;
+    const target = repeat;
     html += `<section class="box result">
       <p class="en">${tappable(r.en)}</p>
       <p class="hint muted">모르는 단어를 누르면 뜻이 나와요</p>
@@ -145,8 +150,8 @@ function createView() {
         <button data-act="c-play1">🔊 한 번 듣기</button>
         <button class="primary" data-act="c-play">${create.playing ? '⏹ 멈추기' : `🔁 ${target}번 듣기`}</button>
       </div>
-      <p class="count">들은 횟수 <b>${create.heard}</b> / ${target} <span class="muted">(복습하며 총 ${LISTEN_TARGET}번)</span></p>
-      ${r.alts.length ? `<div class="alts"><div class="muted">다른 표현</div>${r.alts.map((a, i) => `<p><button class="mini" data-act="alt-play" data-i="${i}">🔊</button> ${tappable(a)}</p>`).join('')}</div>` : ''}
+      <p class="count">들은 횟수 <b>${create.heard}</b> / ${target}</p>
+      ${r.alts.length ? `<div class="alts"><div class="muted">다른 표현</div>${r.alts.map((a, i) => `<div class="alt"><button class="mini" data-act="alt-play" data-i="${i}">🔊</button><p>${tappable(a)}</p>${create.saved ? '' : `<button class="mini" data-act="alt-pick" data-i="${i}">이걸로</button>`}</div>`).join('')}${create.saved ? '' : '<p class="muted small">더 마음에 드는 표현이 있으면 [이걸로]를 눌러 바꾼 뒤 저장하세요</p>'}</div>` : ''}
       ${r.note_ko ? `<p class="note">💡 ${esc(r.note_ko)}</p>` : ''}
       ${r.words.length ? `<div class="words">${r.words.map((w) => `<div><b>${esc(w.word)}</b> <span class="muted">${esc(w.pos)} ${esc(w.ipa)}</span><br>${esc(w.meaning_ko)}</div>`).join('')}</div>` : ''}
       ${create.saved
@@ -176,9 +181,10 @@ function reviewView() {
     html += `<p class="en">${tappable(c.en)}</p>
       ${rateButtons()}
       <div class="btns">
-        <button data-act="r-play">${review.playing ? '⏹ 멈추기' : `🔁 ${review.target}번 듣기`}</button>
+        <button data-act="r-play">${review.playing ? '⏹ 멈추기' : `🔁 ${REVIEW_AUTO}번 더`}</button>
+        ${review.playing ? '' : `<button data-act="r-play-full">🔁 ${repeat}번 듣기</button>`}
       </div>
-      <p class="count">이번에 들은 횟수 <b>${review.heard}</b> / ${review.target}</p>
+      <p class="count">이번에 들은 횟수 <b>${review.heard}</b></p>
       ${c.note ? `<p class="note">💡 ${esc(c.note)}</p>` : ''}
       <div class="muted">얼마나 기억났나요?</div>
       <div class="grades">
@@ -222,6 +228,10 @@ function settingsView() {
     <section class="box"><b>${esc(me?.name)}</b> ${me?.is_admin ? '(관리자)' : ''}</section>
     ${me?.is_admin ? `<section class="box"><b>동료 계정 추가</b>
       <form id="add-user"><input name="name" placeholder="이름" required><input name="password" type="password" placeholder="임시 비밀번호 (6자 이상)" minlength="6" required><button>추가</button></form></section>` : ''}
+    <section class="box"><b>반복 듣기 횟수</b>
+      <div class="btns">${[5, 10, 20, 30].map((n) => `<button data-act="set-repeat" data-n="${n}" class="${repeat === n ? 'on' : ''}">${n}번</button>`).join('')}</div>
+      <p class="muted">새 표현을 만들 때 이 횟수만큼 이어서 들려줘요. 복습 때는 정답을 열면 ${REVIEW_AUTO}번 듣고, 원하면 더 들을 수 있어요.</p>
+    </section>
     <section class="box"><b>저녁 9시 복습 알림</b>
       <p class="muted">${esc(pushNote)}</p>
       ${pushOn ? `<div class="btns"><button data-act="push-test">알림 시험</button><button data-act="push-off">끄기</button></div>` : pushCan ? `<button class="primary" data-act="push-on">알림 켜기</button>` : ''}
@@ -340,15 +350,16 @@ async function reveal() {
   const c = review.queue[review.i];
   review.revealed = true;
   review.heard = 0;
-  review.target = listensThisReview(c.listens, c.stage);
+  review.target = REVIEW_AUTO;
   render();
   reviewPlay(); // 정답을 열면 바로 정해진 횟수만큼 들려줌
 }
 
-async function reviewPlay() {
+async function reviewPlay(times = REVIEW_AUTO) {
+  review.target = times;
   const c = review.queue[review.i];
   if (review.playing) { stopAudio(); review.playing = false; render(); return; }
-  const remain = Math.max(1, review.target - review.heard);
+  const remain = review.target;
   review.playing = true; render();
   try {
     const before = review.heard;
@@ -424,7 +435,25 @@ app.addEventListener('click', async (e) => {
   switch (d.act) {
     case 'generate': return generate();
     case 'rec': return toggleRecord();
-    case 'c-play': return createPlay(FIRST_LISTENS);
+    case 'c-play': return createPlay(repeat);
+    case 'r-play-full': return reviewPlay(repeat);
+    case 'alt-pick': {
+      // 다른 표현을 대표 표현으로: 원래 표현은 다른 표현 목록으로
+      const r = create.result!;
+      const i = Number(d.i);
+      const picked = r.alts[i];
+      r.alts[i] = r.en;
+      r.en = picked;
+      create.heard = 0;
+      stopAudio(); create.playing = false;
+      prefetchVoice(picked);
+      return render();
+    }
+    case 'set-repeat': {
+      repeat = Number(d.n) || 20;
+      try { localStorage.setItem('study.repeat', String(repeat)); } catch { /* 무시 */ }
+      return render();
+    }
     case 'c-play1': return createPlay(1);
     case 'alt-play': {
       const a = create.result?.alts[Number(d.i)];

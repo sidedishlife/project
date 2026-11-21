@@ -1,7 +1,9 @@
 // Gemini 무료 API 연결 (서버에서만 호출. 키는 Supabase 금고의 GEMINI_API_KEY)
 // 2026-11 확인: 2.5 계열은 종료(404). flash-latest는 자주 붐벼서(503) 짧게만 기다리고 lite로 넘어감
-let TEXT_MODELS: [string, number][] = [['gemini-flash-latest', 12_000], ['gemini-flash-lite-latest', 20_000], ['gemini-2.0-flash', 20_000]];
-let TTS_MODELS: [string, number][] = [['gemini-3.1-flash-tts-preview', 40_000], ['gemini-2.5-flash-preview-tts', 40_000], ['gemini-2.5-flash-tts', 40_000]];
+// [모델, 기다릴 시간(ms), 생각 정도(선택: minimal/low/medium/high)]
+let TEXT_MODELS: ModelOpt[] = [['gemini-flash-latest', 12_000], ['gemini-flash-lite-latest', 20_000], ['gemini-2.0-flash', 20_000]];
+let TTS_MODELS: ModelOpt[] = [['gemini-3.1-flash-tts-preview', 40_000], ['gemini-2.5-flash-preview-tts', 40_000], ['gemini-2.5-flash-tts', 40_000]];
+type ModelOpt = [string, number] | [string, number, string];
 const URL_FOR = (m: string) => `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`;
 
 export class AiError extends Error {
@@ -9,7 +11,7 @@ export class AiError extends Error {
 }
 /** DB 설정(app_config의 text_models / tts_models)으로 모델 순서를 바꿀 수 있음: 다시 배포하지 않고 조정 */
 export function setModels(text?: unknown, tts?: unknown) {
-  const ok = (v: unknown): v is [string, number][] => Array.isArray(v) && v.length > 0 && v.every((x) => Array.isArray(x) && typeof x[0] === 'string' && typeof x[1] === 'number');
+  const ok = (v: unknown): v is ModelOpt[] => Array.isArray(v) && v.length > 0 && v.every((x) => Array.isArray(x) && typeof x[0] === 'string' && typeof x[1] === 'number');
   if (ok(text)) TEXT_MODELS = text;
   if (ok(tts)) TTS_MODELS = tts;
   return { text: TEXT_MODELS, tts: TTS_MODELS };
@@ -56,23 +58,23 @@ const EXPRESSION = {
 const EXPRESS_SYSTEM = `당신은 한국인 직장인을 위한 영어 회화 코치입니다.
 사용자가 한국어로 "영어로 이렇게 말하고 싶다"는 내용을 주면, 직역이 아니라 미국 원어민이 그 상황에서 실제로 쓰는 자연스럽고 기억하기 쉬운 표현을 만듭니다.
 - en: 한 문장(길어도 20단어 이내). 말하기 연습용이므로 구어체를 우선합니다. 업무 상황이면 정중한 비즈니스 톤.
-- alts: 더 캐주얼하거나 더 격식 있는 대안이 의미 있을 때만 최대 2개.
+- alts: 같은 뜻을 다른 말투로 2개 (하나는 더 편한 말투, 하나는 더 정중한 말투). en과 거의 같은 문장은 넣지 않습니다.
 - words: en에 나온 단어 중 a, the, I, is 같은 아주 기초 단어를 제외한 단어와 숙어(구동사 포함)를 모두 포함합니다.`;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** 모델을 차례로 시도. 붐빔(503)은 한 번 더, 한도(429)·없는 모델(404)은 다음 모델로 */
-async function call(models: [string, number][], payload: unknown): Promise<{ body: any; model: string }> {
+async function call(models: ModelOpt[], payload: unknown): Promise<{ body: any; model: string }> {
   const key = geminiKey();
   if (!key) throw new AiError(503, 'Gemini 키가 서버에 아직 없어요 (관리자 설정 필요)');
   let busy = 0, quota = 0, last = '';
   // 모델마다 한 번씩. 붐빔·시간초과·한도·없는 모델이면 바로 다음 모델로
-  for (const [m, timeoutMs] of models) {
+  for (const [m, timeoutMs, think] of models) {
     const t0 = Date.now();
     const res = await fetch(URL_FOR(m), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-      body: JSON.stringify(typeof payload === 'function' ? payload(m) : payload),
+      body: JSON.stringify(typeof payload === 'function' ? payload(m, think) : payload),
       signal: AbortSignal.timeout(timeoutMs),
     }).catch((e) => { console.log(`gemini ${m} 응답 없음 ${Date.now() - t0}ms ${e?.name}`); return null; });
     if (!res) { last = `${m} 응답 없음`; busy++; continue; }
@@ -105,12 +107,13 @@ function parseLoose(text: string): any {
 }
 
 async function askJSON(system: string, user: string, schema: object, maxTokens: number, parts: unknown[] = []) {
-  const { body, model } = await call(TEXT_MODELS, (m: string) => ({
+  const { body, model } = await call(TEXT_MODELS, (_m: string, think?: string) => ({
     systemInstruction: { parts: [{ text: system }] },
     contents: [{ role: 'user', parts: [...parts, { text: user }] }],
     generationConfig: {
       responseMimeType: 'application/json', responseSchema: schema, maxOutputTokens: maxTokens, temperature: 0.6,
-      // 2.5 계열은 '생각' 단계 때문에 느려서 끔 (짧은 변환 작업이라 품질 차이 작음)
+      // 생각 단계를 줄여 속도를 높임 (설정에 적은 모델만)
+      ...(think ? { thinkingConfig: { thinkingLevel: think } } : {}),
     },
   }));
   const cand = body?.candidates?.[0];
