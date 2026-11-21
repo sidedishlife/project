@@ -6,7 +6,7 @@
     "dev": "vite --host",
     "build": "tsc && vite build",
     "preview": "vite preview --host",
-    "test": "vitest run",
+    "test": "vitest run --passWithNoTests",
     "test:server": "deno test -A supabase/functions/api"
   },
   "devDependencies": {
