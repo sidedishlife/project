@@ -1,6 +1,7 @@
 // Study 영어 앱 서버. 모든 데이터 접근은 이 함수를 거친다(관리자 권한, 바깥 직접 접근은 DB에서 막혀 있음).
 // 주소: https://<project>.supabase.co/functions/v1/api/<경로>
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { express, lookup, transcribe, speak, geminiKey, AiError, VOICE } from './gemini.ts';
 import { schedule, firstDue, listensThisReview, FIRST_LISTENS, type Grade } from './srs.ts';
 
 const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
@@ -112,7 +113,7 @@ async function route(req: Request): Promise<Response> {
   if (m === 'GET' && path === '/status') {
     const { count, error } = await db.from('users').select('id', { count: 'exact', head: true }).eq('is_admin', true);
     if (error) throw new HttpError(500, error.message);
-    return json({ ok: true, setup_needed: (count ?? 0) === 0 });
+    return json({ ok: true, setup_needed: (count ?? 0) === 0, gemini_key: !!geminiKey() });
   }
 
   // 처음 관리자 만들기: 관리자가 하나도 없을 때만
@@ -168,6 +169,42 @@ async function route(req: Request): Promise<Response> {
     if (error) throw new HttpError(error.code === '23505' ? 409 : 500, error.code === '23505' ? '이미 있는 이름이에요' : error.message);
     await db.from('stats').insert({ user_id: data.id });
     return json({ user: data }, 201);
+  }
+
+  // ── Gemini
+  if (m === 'POST' && path === '/ai/express') {
+    const ko = String((await body()).ko ?? '').trim();
+    if (!ko) throw new HttpError(400, '한국어 문장을 입력해 주세요');
+    if (ko.length > 500) throw new HttpError(400, '500자 이내로 입력해 주세요');
+    return json(await express(ko));
+  }
+  if (m === 'POST' && path === '/ai/word') {
+    const b = await body();
+    const word = String(b.word ?? '').trim().slice(0, 60), sentence = String(b.sentence ?? '').slice(0, 500);
+    if (!word) throw new HttpError(400, '단어가 필요해요');
+    return json(await lookup(word, sentence));
+  }
+  if (m === 'POST' && path === '/ai/transcribe') {
+    const b = await body();
+    const audio = String(b.audio ?? ''), mime = String(b.mime ?? 'audio/webm').split(';')[0];
+    if (!audio) throw new HttpError(400, '녹음이 비어 있어요');
+    if (audio.length > 8_000_000) throw new HttpError(400, '녹음이 너무 길어요 (1분 이내로)');
+    return json(await transcribe(audio, mime));
+  }
+  // 영어 음성: 문장마다 한 번만 만들어 저장소에 두고, 이후엔 저장된 파일 주소를 돌려줌
+  if (m === 'POST' && path === '/tts') {
+    const text = String((await body()).text ?? '').trim().slice(0, 500);
+    if (!text) throw new HttpError(400, '문장이 필요해요');
+    const id = await sha256(`${VOICE}|${text}`);
+    const { data: hit } = await db.from('audio_cache').select('path').eq('id', id).maybeSingle();
+    const publicUrl = (p: string) => db.storage.from('audio').getPublicUrl(p).data.publicUrl;
+    if (hit) return json({ url: publicUrl(hit.path), cached: true });
+    const { wav, model } = await speak(text);
+    const path = `${id}.wav`;
+    const up = await db.storage.from('audio').upload(path, wav, { contentType: 'audio/wav', upsert: true, cacheControl: '31536000' });
+    if (up.error) throw new HttpError(500, `음성 저장 실패: ${up.error.message}`);
+    await db.from('audio_cache').upsert({ id, path, model });
+    return json({ url: publicUrl(path), cached: false, model });
   }
 
   // 카드 목록
@@ -260,7 +297,7 @@ Deno.serve(async (req) => {
   try {
     return await route(req);
   } catch (e) {
-    if (e instanceof HttpError) return json({ error: e.message }, e.status);
+    if (e instanceof HttpError || e instanceof AiError) return json({ error: e.message }, e.status);
     console.error(e);
     return json({ error: '서버 오류가 났어요. 잠시 후 다시 시도해 주세요' }, 500);
   }
