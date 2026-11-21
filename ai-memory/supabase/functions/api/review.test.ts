@@ -162,3 +162,20 @@ Deno.test('오류: 없는 대상 404, quick에 grade 없음/잘못된 grade 400,
   assertEquals(await st({ unit_type: 'concept', unit_id: c.id, mode: 'deep', answer: '  ' }), 400);
   assertEquals(repo.data.reviewLog.length, 0);
 });
+
+Deno.test('deep + grade(자기채점 재전송) → AI 호출 없이 그 grade 적용, feedback null, 답 기록', async () => {
+  const { repo, deps } = setup(5, () => { throw new Error('AI must not be called'); });
+  const c = await addConcept(repo, 'a', '2026-11-20T00:00:00Z', 3, ['q']);
+  const r = await submitGrade(deps, { unit_type: 'concept', unit_id: c.id, mode: 'deep', answer: '내 답', grade: 'good', question_id: repo.data.questions[0].id });
+  assertEquals([r.grade, r.feedback], ['good', null]);
+  assertEquals(repo.data.concepts[0].stage, 4);
+  assertEquals(repo.data.reviewLog.length, 1);
+  assertEquals([repo.data.reviewLog[0].mode, repo.data.reviewLog[0].answer, repo.data.reviewLog[0].feedback], ['deep', '내 답', null]);
+  assertEquals(repo.data.questions[0].last_asked_at, NOW.toISOString());
+});
+
+Deno.test('daily_goal이 NaN이면 5로', async () => {
+  const { repo, deps } = setup(NaN);
+  for (let i = 0; i < 7; i++) await addConcept(repo, `c${i}`, `2026-11-20T0${i}:00:00Z`);
+  assertEquals((await todayResponse(NOW, deps)).items.length, 5);
+});

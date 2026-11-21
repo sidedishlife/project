@@ -51,9 +51,9 @@ function pickQuestion<Q extends { id: string; last_asked_at: string | null }>(qs
   })[0];
 }
 
-export async function todayQueue(now: Date, d: ReviewDeps): Promise<ReviewItem[]> {
-  const goal = Math.max(0, d.config.daily_goal);
-  const entries = (await dueEntries(d.repo, seoulDayEnd(now))).slice(0, goal);
+type Entry = Awaited<ReturnType<typeof dueEntries>>[number];
+
+async function buildItems(d: ReviewDeps, entries: Entry[]): Promise<ReviewItem[]> {
   const items: ReviewItem[] = [];
   for (const e of entries) {
     if (e.t === 'concept') {
@@ -73,21 +73,26 @@ export async function todayQueue(now: Date, d: ReviewDeps): Promise<ReviewItem[]
   return items;
 }
 
+const goalOf = (d: ReviewDeps) => (Number.isFinite(d.config.daily_goal) ? Math.max(0, d.config.daily_goal) : 5);
+const nextDayEnd = (end: Date) => seoulDayEnd(new Date(end.getTime() + DAY));
+
+/** due를 한 번만 읽어 오늘 큐·남은 개수·내일 개수를 모두 계산 */
+export async function todayResponse(now: Date, d: ReviewDeps) {
+  const end = seoulDayEnd(now);
+  const all = await dueEntries(d.repo, nextDayEnd(end));
+  const today = all.filter((e) => new Date(e.due) <= end);
+  const items = await buildItems(d, today.slice(0, goalOf(d)));
+  return { items, remaining_after: Math.max(0, today.length - items.length), tomorrow: all.length - today.length };
+}
+
+export async function todayQueue(now: Date, d: ReviewDeps): Promise<ReviewItem[]> {
+  const entries = (await dueEntries(d.repo, seoulDayEnd(now))).slice(0, goalOf(d));
+  return await buildItems(d, entries);
+}
+
 /** 오늘(서울) 끝까지 복습할 전체 개수 (하루 목표로 자르지 않음) */
 export async function todayCount(now: Date, d: ReviewDeps): Promise<number> {
   return (await dueEntries(d.repo, seoulDayEnd(now))).length;
-}
-
-/** 다음 서울 날짜에 새로 도래하는 개수 */
-export async function tomorrowCount(now: Date, d: ReviewDeps): Promise<number> {
-  const end = seoulDayEnd(now);
-  const next = seoulDayEnd(new Date(end.getTime() + DAY));
-  return (await dueEntries(d.repo, next)).filter((e) => new Date(e.due) > end).length;
-}
-
-export async function todayResponse(now: Date, d: ReviewDeps) {
-  const [items, count, tomorrow] = await Promise.all([todayQueue(now, d), todayCount(now, d), tomorrowCount(now, d)]);
-  return { items, remaining_after: Math.max(0, count - items.length), tomorrow };
 }
 
 const notFound = () => new HttpError(404, '복습 대상을 찾을 수 없어요');
@@ -135,18 +140,18 @@ export async function submitGrade(d: ReviewDeps, item: GradeInput): Promise<Grad
     if (!p) throw notFound();
     state = p;
     question = p.question;
-    note = item.mode === 'deep' ? (await reveal(d, 'pair', p.id)).note_md : '';
+    note = item.mode === 'deep' && !item.grade ? (await reveal(d, 'pair', p.id)).note_md : '';
   }
 
   let grade: Grade;
   let feedback: GradeFeedback | null = null;
-  if (item.mode === 'deep') {
+  if (item.mode === 'deep' && !item.grade) {
     const r = await d.ai.gradeAnswer(question, note, answer);
     if (!r) return { grade: null, feedback: null, next_due: null }; // 클라이언트가 자기채점으로 다시 보냄
     grade = r.grade;
     feedback = { hit: r.hit, missed: r.missed, comment: r.comment };
   } else {
-    grade = item.grade!;
+    grade = item.grade!; // quick, 또는 AI 채점 실패 뒤 사용자가 직접 고른 deep 자기채점(AI 재호출 없음)
   }
 
   const now = d.now();
