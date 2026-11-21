@@ -6,8 +6,8 @@ import { unlockAudio, playTimes, stopAudio, prefetchVoice, getRate, setRate } fr
 import { pushState, enablePush, disablePush } from './push';
 import { recordingSupported, startRecording, stopAndTranscribe, cancelRecording } from './recorder';
 import { MASTERED_STAGE } from '../supabase/functions/api/srs';
-import { XP, levelOf, regionOf, REGIONS, tierOf, ALL_TIERS, QUESTS, emptyDay, type Day } from './game';
-import { heroine, monster, scene, type Face } from './art';
+import { XP, levelOf, regionOf, tierOf, ALL_TIERS, QUESTS, emptyDay, type Day } from './game';
+import { heroImg, castImg, faceImg, faceUrl, monsterImg, sceneBg, preloadArt, type Face } from './art';
 
 const app = document.getElementById('app')!;
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
@@ -60,7 +60,6 @@ function today(): Day {
   return d && d.date === kstDay() ? d : emptyDay(kstDay());
 }
 const level = () => levelOf(stats?.xp ?? 0);
-const regionIndex = (lv: number) => REGIONS.indexOf(regionOf(lv));
 
 // ───────── 경험치·퀘스트
 /** 경험치를 주고, 레벨이 오르면 축하 창을 띄움. 오늘 기록(day)도 함께 저장 */
@@ -89,7 +88,7 @@ function levelUp(from: number, to: number) {
   pop.className = 'modal';
   pop.innerHTML = `<div class="panel pop">
     <div class="ribbon">LEVEL UP!</div>
-    <div class="pop-hero">${heroine('happy', regionIndex(to), 150)}</div>
+    <div class="pop-hero">${faceImg('happy', 'pop-face')}</div>
     <p class="lvbig">Lv.${from} → <b>Lv.${to}</b></p>
     ${r1 !== r2 ? `<p class="unlock">🗺️ 새 지역 <b>${r2.name}</b>이 열렸어요!<br>새 칭호: <b>${r2.title}</b></p>` : `<p class="muted">다음 지역까지 조금만 더!</p>`}
     <button class="btn gold" data-close>계속하기</button></div>`;
@@ -114,7 +113,7 @@ function tappable(en: string) {
 // ───────── 화면 그리기
 function render() {
   let html = '';
-  if (screen === 'loading') html = `<div class="center loading">${heroine('normal', 0, 120)}<p>모험을 준비하는 중…</p></div>`;
+  if (screen === 'loading') html = `<div class="center loading">${heroImg('loading-hero')}<p>모험을 준비하는 중…</p></div>`;
   else if (screen === 'setup' || screen === 'login') html = authView();
   else {
     html = hud();
@@ -137,7 +136,7 @@ function hud() {
   const { lv, cur, need } = level();
   const r = regionOf(lv);
   return `<header class="hud">
-    <div class="avatar">${heroine('normal', regionIndex(lv), 64)}<span class="lv">Lv.${lv}</span></div>
+    <div class="avatar" style="background-image:url(${faceUrl('happy')})"><span class="lv">Lv.${lv}</span></div>
     <div class="who"><b>${esc(me?.name)}</b><small>${r.title}</small>
       <div class="xpbar"><i style="width:${Math.round((cur / need) * 100)}%"></i><span>${cur} / ${need} XP</span></div></div>
     <div class="streak" title="연속 공부">🔥<b>${stats?.streak ?? 0}</b></div>
@@ -149,7 +148,7 @@ function authView() {
   const setup = screen === 'setup';
   return `<main class="auth">
     <div class="title-banner">영어 모험</div>
-    <div class="auth-hero">${heroine('happy', 0, 170)}</div>
+    <div class="auth-hero">${heroImg()}</div>
     <div class="panel">
       <p class="dialog">${setup ? '처음 오셨군요! 모험가 이름과 비밀번호를 정해 주세요. (나중에 동료도 초대할 수 있어요)' : '다시 오셨군요! 이름과 비밀번호를 알려 주세요.'}</p>
       <form id="auth">
@@ -184,11 +183,11 @@ function homeView() {
   const mastered = cards.filter((c) => c.stage >= MASTERED_STAGE).length;
   return `<main>
     <section class="stage">
-      ${scene(r)}
-      <div class="region">${r.name}</div>
-      <div class="stage-hero">${heroine(face, regionIndex(lv), 150)}</div>
+      ${sceneBg(r)}
+      <div class="region">📍 ${r.name}</div>
+      <div class="stage-hero">${heroImg()}</div>
     </section>
-    <section class="dialog-box"><b>모험 안내</b><p>${line}</p></section>
+    <section class="dialog-box with-face">${faceImg(face, 'dlg-face')}<b class="speaker">${esc(me?.name)}</b><p>${line}</p></section>
     ${cta}
     <section class="panel">
       <div class="ribbon">오늘의 퀘스트</div>
@@ -254,7 +253,7 @@ function reviewView() {
     const next = cards.filter((x) => x.due > now()).sort((a, b) => a.due - b.due)[0];
     return `<main><section class="panel center">
       <div class="ribbon">${review.done ? '승리!' : '조용한 들판'}</div>
-      <div class="pop-hero">${heroine(review.done ? 'happy' : 'normal', regionIndex(lv), 140)}</div>
+      <div class="pop-hero">${faceImg(review.done ? 'happy' : 'wow', 'pop-face')}</div>
       ${review.done ? `<p class="lvbig">몬스터 <b>${review.done}</b>마리 처치 · <b>+${review.xp}</b> XP</p>` : `<p>지금은 나타난 몬스터가 없어요</p>`}
       <p class="muted">${next ? `다음 몬스터: ${when(next.due)}` : ''}</p>
       <button class="btn gold" data-go="home">마을로 돌아가기</button>
@@ -264,10 +263,10 @@ function reviewView() {
   const tier = tierOf(c.stage);
   let html = `<main>
     <section class="battle">
-      ${scene(r)}
+      ${sceneBg(r)}
       <div class="bt-top"><span>남은 몬스터 ${left}</span>${review.combo > 1 ? `<span class="combo">${review.combo} COMBO!</span>` : ''}<span style="color:${tier.color}">${tier.icon} ${tier.name}</span></div>
-      <div class="bt-monster">${monster(c.id, review.hit, 110)}</div>
-      <div class="bt-hero">${heroine(review.revealed ? 'wow' : 'normal', regionIndex(lv), 100)}</div>
+      <div class="bt-monster">${monsterImg(c.stage, review.hit)}</div>
+      <div class="bt-hero">${review.revealed ? castImg('casting') : heroImg()}</div>
     </section>
     <section class="panel">
       <p class="sub">이 말을 영어로 외쳐 보세요!</p>
@@ -629,4 +628,5 @@ document.addEventListener('visibilitychange', () => {
 
 if ('serviceWorker' in navigator && import.meta.env.PROD) navigator.serviceWorker.register('./sw.js').catch(() => {});
 
+preloadArt();
 start();
