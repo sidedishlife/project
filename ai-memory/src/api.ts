@@ -29,7 +29,8 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new ApiError(0, '서버에 연결할 수 없어요. 네트워크를 확인해 주세요');
   }
   const data = await res.json().catch(() => null);
-  if (res.status === 401) {
+  // 로그인/설정 요청의 401은 '비밀번호 틀림'이므로 세션 만료 처리를 하지 않는다
+  if (res.status === 401 && path !== '/login' && path !== '/setup') {
     clearToken();
     window.dispatchEvent(new Event('login'));
   }

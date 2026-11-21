@@ -28,6 +28,19 @@ describe('api()', () => {
     expect(onLogin).toHaveBeenCalledTimes(1);
   });
 
+  it('/login 401은 토큰을 지우지 않고 login 이벤트도 내지 않는다', async () => {
+    const store = stubEnv(async () => res(401, { error: '이름 또는 비밀번호가 올바르지 않아요' }));
+    store.set('aim_token', 'tok');
+    const { api, ApiError } = await import('./api');
+    const onLogin = vi.fn();
+    window.addEventListener('login', onLogin);
+    const err = (await api('/login', { method: 'POST' }).catch((e: unknown) => e)) as InstanceType<typeof ApiError>;
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.message).toBe('이름 또는 비밀번호가 올바르지 않아요');
+    expect(store.get('aim_token')).toBe('tok');
+    expect(onLogin).not.toHaveBeenCalled();
+  });
+
   it('토큰을 Authorization 헤더로 보내고 JSON을 돌려준다', async () => {
     const store = stubEnv(async () => res(200, { ok: 1 }));
     store.set('aim_token', 'tok');
