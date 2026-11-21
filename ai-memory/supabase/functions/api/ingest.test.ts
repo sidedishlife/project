@@ -177,3 +177,51 @@ Deno.test('pasteConversation: 추출 결과를 paste로 제출, 실패하면 502
   deps.ai.extractCandidates = async () => [];
   assertEquals(await pasteConversation(deps, '대화'), { created: 0 });
 });
+
+Deno.test('같은 개념으로 합치는 후보 둘 → 둘 다 확정해도 두 내용이 모두 남는다', async () => {
+  const { repo, deps } = setup();
+  const x = await repo.insertConcept({ field_id: null, title: 'X', note_md: 'base', stage: 2, due_at: NOW.toISOString() });
+  deps.ai.matchConcept = async () => ({ action: 'merge', target_id: x.id, reason: '' });
+  // 가짜 AI: 기존 + 추가를 이어 붙임
+  deps.ai.mergeNote = async (o, a) => ({ note_md: `${o}|${a}`, changes: [] });
+  await submitCandidates(deps, 'claude', [cand(1), cand(2)]);
+  const [c1, c2] = repo.data.candidates.map((c) => c.id);
+  await confirmCandidate(deps, c1, { action: 'merge' });
+  await confirmCandidate(deps, c2, { action: 'merge' }); // 초안은 'base' 기준이라 낡음 → 다시 합쳐야 함
+  const note = repo.data.concepts[0].note_md;
+  assert(note.includes('노트1') && note.includes('노트2'), note);
+  assertEquals(repo.data.versions.length, 2);
+});
+
+Deno.test('중복 확인 뒤 삽입 사이에 같은 해시가 들어오면 조건부 삽입이 막는다', async () => {
+  const { repo, deps } = setup();
+  const orig = deps.ai.matchConcept;
+  let injected = false;
+  deps.ai.matchConcept = async (...a) => {
+    if (!injected) { injected = true; await repo.insertCandidateIfNew({ source: 'claude', content_hash: await h('개념1\n노트1'), title: '개념1', note_md: '노트1', questions: [], field_hint: null, proposal: null, created_at: NOW.toISOString() }, new Date(0)); }
+    return orig(...a);
+  };
+  await repo.insertConcept({ field_id: null, title: '기존', note_md: 'x', stage: 0, due_at: NOW.toISOString() });
+  assertEquals(await submitCandidates(deps, 'claude', [cand(1)]), { created: 0, skipped_duplicates: 1, over_limit: 0 });
+  assertEquals(repo.data.candidates.length, 1);
+});
+
+async function h(s: string) {
+  const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('');
+}
+
+Deno.test('개념이 하나도 없으면 matchConcept를 부르지 않는다', async () => {
+  let called = 0;
+  const { deps } = setup({ matchConcept: async () => { called++; return null; } });
+  await submitCandidates(deps, 'claude', [cand(1)]);
+  assertEquals(called, 0);
+});
+
+Deno.test('확정 중 실패하면 후보는 pending으로 돌아간다', async () => {
+  const { repo, deps } = setup();
+  await submitCandidates(deps, 'claude', [cand(1)]);
+  const id = repo.data.candidates[0].id;
+  await assertRejects(() => confirmCandidate(deps, id, { action: 'merge' }), HttpError); // target 없음 → 400
+  assertEquals(repo.data.candidates[0].status, 'pending');
+});

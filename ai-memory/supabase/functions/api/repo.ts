@@ -22,10 +22,13 @@ export interface Repo {
   maskTerms(): Promise<MaskTerm[]>;
   // candidates
   hasCandidateHashSince(hash: string, since: Date): Promise<boolean>;
-  insertCandidate(c: NewCandidate): Promise<CandidateRow>;
+  /** 같은 해시가 since 이후에 없을 때만 한 문장으로 삽입. 삽입했으면 행, 아니면 null */
+  insertCandidateIfNew(c: NewCandidate, since: Date): Promise<CandidateRow | null>;
+  /** status가 pending일 때만 status를 바꾸고 그 행을 돌려줌 (없거나 이미 처리됐으면 null) */
+  claimCandidate(id: string, status: 'done' | 'discarded'): Promise<CandidateRow | null>;
+  releaseCandidate(id: string): Promise<void>;
   listPendingCandidates(): Promise<CandidateRow[]>;
   getCandidate(id: string): Promise<CandidateRow | null>;
-  updateCandidate(id: string, patch: Partial<Pick<CandidateRow, 'status' | 'proposal'>>): Promise<void>;
   // concepts
   listConcepts(): Promise<ConceptRow[]>;
   getConcept(id: string): Promise<ConceptRow | null>;
@@ -62,17 +65,25 @@ export function supabaseRepo(): Repo {
       if (error) throw new HttpError(500, error.message);
       return (count ?? 0) > 0;
     },
-    async insertCandidate(c) {
-      return ok(await db.from('candidates').insert(c).select('*').single()) as CandidateRow;
+    async insertCandidateIfNew(c, since) {
+      const id = ok(await db.rpc('insert_candidate_if_new', {
+        p_source: c.source, p_hash: c.content_hash, p_title: c.title, p_note_md: c.note_md,
+        p_questions: c.questions, p_field_hint: c.field_hint, p_proposal: c.proposal,
+        p_created_at: c.created_at, p_since: since.toISOString(),
+      })) as string | null;
+      return id ? await this.getCandidate(id) : null;
+    },
+    async claimCandidate(id, status) {
+      return (ok(await db.from('candidates').update({ status }).eq('id', id).eq('status', 'pending').select('*').maybeSingle()) ?? null) as CandidateRow | null;
+    },
+    async releaseCandidate(id) {
+      ok(await db.from('candidates').update({ status: 'pending' }).eq('id', id));
     },
     async listPendingCandidates() {
       return (ok(await db.from('candidates').select('*').eq('status', 'pending').order('created_at')) ?? []) as CandidateRow[];
     },
     async getCandidate(id) {
       return (ok(await db.from('candidates').select('*').eq('id', id).maybeSingle()) ?? null) as CandidateRow | null;
-    },
-    async updateCandidate(id, patch) {
-      ok(await db.from('candidates').update(patch).eq('id', id));
     },
     async listConcepts() {
       return (ok(await db.from('concepts').select('*')) ?? []) as ConceptRow[];
@@ -104,8 +115,8 @@ export function supabaseRepo(): Repo {
     async searchNotes(q, field_id) {
       let query = db.from('concepts').select(summary).order('updated_at', { ascending: false });
       if (field_id) query = query.eq('field_id', field_id);
-      // PostgREST or-필터 구분자가 섞이지 않게 특수문자를 공백으로
-      const s = q.replace(/[,()"\\%*_]/g, ' ').trim();
+      // ilike 와일드카드(% _ \)는 이스케이프하고, 따옴표로 감싼 PostgREST 값 안의 \ 와 "도 이스케이프
+      const s = q.trim().replace(/[\\%_]/g, '\\$&').replace(/[\\"]/g, '\\$&');
       if (s) query = query.or(`title.ilike."%${s}%",note_md.ilike."%${s}%"`);
       return (ok(await query) ?? []) as NoteSummary[];
     },
@@ -147,14 +158,21 @@ export function memoryRepo(seed: { mask?: MaskTerm[] } = {}): MemoryRepo {
     maskTerms: async () => clone(data.mask),
     hasCandidateHashSince: async (hash, since) =>
       data.candidates.some((c) => c.content_hash === hash && new Date(c.created_at) >= since),
-    insertCandidate: async (c) => {
+    insertCandidateIfNew: async (c, since) => {
+      if (data.candidates.some((x) => x.content_hash === c.content_hash && new Date(x.created_at) >= since)) return null;
       const row: CandidateRow = { ...clone(c), id: uid(), status: 'pending' };
       data.candidates.push(row);
       return clone(row);
     },
+    claimCandidate: async (id, status) => {
+      const row = data.candidates.find((c) => c.id === id && c.status === 'pending');
+      if (!row) return null;
+      row.status = status;
+      return clone(row);
+    },
+    releaseCandidate: async (id) => { data.candidates.find((c) => c.id === id)!.status = 'pending'; },
     listPendingCandidates: async () => clone(data.candidates.filter((c) => c.status === 'pending')),
     getCandidate: async (id) => clone(data.candidates.find((c) => c.id === id) ?? null),
-    updateCandidate: async (id, patch) => { Object.assign(data.candidates.find((c) => c.id === id)!, clone(patch)); },
     listConcepts: async () => clone(data.concepts),
     getConcept: async (id) => clone(data.concepts.find((c) => c.id === id) ?? null),
     insertConcept: async (c) => {
