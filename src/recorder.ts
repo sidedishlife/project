@@ -33,7 +33,7 @@ export async function startRecording(maxMs = 60_000, onAutoStop?: () => void) {
 }
 
 /** 녹음을 멈추고 받아 적은 글자를 돌려줌 */
-export async function stopAndTranscribe(): Promise<string> {
+export async function stopAndTranscribe(lang: 'ko' | 'en' = 'ko'): Promise<string> {
   clearTimeout(timer);
   const r = rec;
   if (!r) return '';
@@ -50,7 +50,7 @@ export async function stopAndTranscribe(): Promise<string> {
     fr.onerror = () => rej(new Error('녹음을 읽지 못했어요'));
     fr.readAsDataURL(blob);
   });
-  const text = await api.transcribe(b64, blob.type);
+  const text = await api.transcribe(b64, blob.type, lang);
   if (!text) throw new Error('말소리를 알아듣지 못했어요. 조금 더 크게 말해 주세요');
   return text;
 }

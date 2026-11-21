@@ -7,7 +7,8 @@ export const XP = {
   loop: 10, // 반복 듣기 끝까지
   good: 10, hard: 5, again: 2, // 복습 채점
   comboBonus: 2, // 연속 정답 1회당 추가 (최대 +10)
-  allDone: 30, // 그날 복습 전부 끝내기
+  speak: 5, // 말해서 공격 성공 (80점 이상)
+  perfect: 5, // 95점 이상 추가
   streakPerDay: 5, streakMax: 50, // 연속 공부일 보너스 (하루 첫 공부 때)
 };
 
@@ -54,12 +55,37 @@ export function tierOf(stage: number): Tier {
 export const ALL_TIERS = TIERS;
 
 // ── 오늘의 퀘스트
-export interface Day { date: string; reviewed: number; created: number; loops: number; allDone: boolean; claimed: string[]; firstStudy: boolean }
-export const emptyDay = (date: string): Day => ({ date, reviewed: 0, created: 0, loops: 0, allDone: false, claimed: [], firstStudy: false });
+export interface Day { date: string; reviewed: number; created: number; loops: number; spoken: number; allDone: boolean; claimed: string[]; firstStudy: boolean }
+export const emptyDay = (date: string): Day => ({ date, reviewed: 0, created: 0, loops: 0, spoken: 0, allDone: false, claimed: [], firstStudy: false });
 
-export interface Quest { id: string; label: string; goal: number; xp: number; progress: (d: Day) => number }
+/** go: 누르면 이동할 곳 */
+export interface Quest { id: string; icon: string; label: string; goal: number; xp: number; go: 'review' | 'create' | 'speak'; progress: (d: Day) => number }
 export const QUESTS: Quest[] = [
-  { id: 'review', label: '모험 완료: 복습 모두 끝내기', goal: 1, xp: 30, progress: (d) => (d.allDone ? 1 : 0) },
-  { id: 'create', label: '새 주문 2개 배우기', goal: 2, xp: 30, progress: (d) => d.created },
-  { id: 'loop', label: '반복 듣기 끝까지 1번', goal: 1, xp: 20, progress: (d) => d.loops },
+  { id: 'review', icon: '⚔️', label: '오늘의 몬스터 모두 물리치기', goal: 1, xp: 30, go: 'review', progress: (d) => (d.allDone ? 1 : 0) },
+  { id: 'speak', icon: '🎙️', label: '말해서 공격 3번 성공', goal: 3, xp: 30, go: 'speak', progress: (d) => d.spoken ?? 0 },
+  { id: 'create', icon: '✨', label: '새 주문 2개 배우기', goal: 2, xp: 30, go: 'create', progress: (d) => d.created },
+  { id: 'loop', icon: '🔁', label: '반복 듣기 끝까지 1번', goal: 1, xp: 20, go: 'create', progress: (d) => d.loops },
 ];
+
+// ── 누적 기록과 업적
+export interface Totals { spoken: number; perfect: number; reviewed: number; created: number }
+export const emptyTotals = (): Totals => ({ spoken: 0, perfect: 0, reviewed: 0, created: 0 });
+export interface Ctx { cards: number; mastered: number; gold: number; streak: number; combo: number; t: Totals }
+export interface Badge { id: string; icon: string; name: string; desc: string; xp: number; done: (c: Ctx) => boolean; now: (c: Ctx) => number; goal: number }
+const B = (id: string, icon: string, name: string, desc: string, goal: number, now: (c: Ctx) => number, xp = 50): Badge => ({ id, icon, name, desc, xp, goal, now, done: (c) => now(c) >= goal });
+export const BADGES: Badge[] = [
+  B('first', '📜', '첫 주문', '주문 1개 배우기', 1, (c) => c.cards, 30),
+  B('cards10', '📚', '주문 수집가', '주문 10개 배우기', 10, (c) => c.cards),
+  B('cards50', '🏛️', '주문 도서관', '주문 50개 배우기', 50, (c) => c.cards, 150),
+  B('cards100', '🌟', '대마법사의 서재', '주문 100개 배우기', 100, (c) => c.cards, 300),
+  B('speak1', '🎙️', '첫 외침', '말해서 공격 1번 성공', 1, (c) => c.t.spoken, 30),
+  B('speak50', '🗣️', '유창한 마법사', '말해서 공격 50번 성공', 50, (c) => c.t.spoken, 150),
+  B('perfect10', '🎯', '완벽한 발음', '95점 이상 10번', 10, (c) => c.t.perfect, 100),
+  B('gold1', '🥇', '황금 주문', '골드 등급 주문 1개', 1, (c) => c.gold),
+  B('master1', '👑', '첫 마스터', '마스터 주문 1개 (4달 기억)', 1, (c) => c.mastered, 200),
+  B('streak3', '🔥', '사흘 연속', '3일 연속 공부', 3, (c) => c.streak, 30),
+  B('streak7', '☄️', '일주일 연속', '7일 연속 공부', 7, (c) => c.streak, 100),
+  B('streak30', '🌋', '한 달 연속', '30일 연속 공부', 30, (c) => c.streak, 300),
+  B('combo10', '⚡', '10 콤보', '연속 정답 10번', 10, (c) => c.combo, 100),
+];
+

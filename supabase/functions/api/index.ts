@@ -326,7 +326,7 @@ async function route(req: Request): Promise<Response> {
     const audio = String(b.audio ?? ''), mime = String(b.mime ?? 'audio/webm').split(';')[0];
     if (!audio) throw new HttpError(400, '녹음이 비어 있어요');
     if (audio.length > 8_000_000) throw new HttpError(400, '녹음이 너무 길어요 (1분 이내로)');
-    return json(await transcribe(audio, mime));
+    return json(await transcribe(audio, mime, b.lang === 'en' ? 'en' : 'ko'));
   }
   // 영어 음성: 문장마다 한 번만 만들어 저장소에 두고, 이후엔 저장된 파일 주소를 돌려줌
   if (m === 'POST' && path === '/tts') {

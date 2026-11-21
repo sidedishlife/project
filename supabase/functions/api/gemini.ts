@@ -151,7 +151,18 @@ export async function lookup(word: string, sentence: string) {
 }
 
 /** 녹음한 한국어 → 글자 */
-export async function transcribe(audioB64: string, mime: string) {
+export async function transcribe(audioB64: string, mime: string, lang = 'ko') {
+  // 영어 말하기 채점용: 들린 그대로 (문법·발음을 고쳐 주면 채점이 의미 없어짐)
+  if (lang === 'en') {
+    const { data, model } = await askJSON(
+      'You transcribe English speech exactly as spoken by a Korean learner. Write only the words actually heard, in order. Do NOT correct grammar, do NOT fill in missing words, do NOT guess the intended sentence. If a word is unclear, write what it sounded like. If there is no speech, return an empty string.',
+      'Transcribe this recording.',
+      { type: 'OBJECT', properties: { text: S('heard words') }, required: ['text'] },
+      512,
+      [{ inlineData: { mimeType: mime, data: audioB64 } }],
+    );
+    return { text: str(data?.text).trim(), model };
+  }
   const { data, model } = await askJSON(
     '녹음된 말을 그대로 받아 적습니다. 주로 한국어이며, 영어 단어나 문장이 섞여 있으면 영어는 영어로 적습니다. 말한 내용만 적고 설명은 붙이지 않습니다. 말소리가 없을 때만 빈 문자열.',
     '이 녹음을 한국어 글자로 적어 주세요.',

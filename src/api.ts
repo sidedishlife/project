@@ -8,7 +8,7 @@ export interface Card {
 }
 export interface Expression { en: string; alts: string[]; note_ko: string; words: Word[]; model: string }
 export interface User { id: string; name: string; is_admin: boolean }
-export interface Stats { xp: number; streak: number; last_study_day: string | null; best_combo: number; pet_name: string; day: any }
+export interface Stats { xp: number; streak: number; last_study_day: string | null; best_combo: number; pet_name: string; day: any; totals: any; badges: string[] }
 export type Grade = 'again' | 'hard' | 'good';
 
 const TOKEN_KEY = 'study.token';
@@ -27,7 +27,7 @@ export class ApiError extends Error {
 export let onUnauthorized = () => {};
 export const setOnUnauthorized = (f: () => void) => { onUnauthorized = f; };
 
-async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 60_000): Promise<T> {
+async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 60_000, keepalive = false): Promise<T> {
   let res: Response;
   try {
     res = await fetch(API + path, {
@@ -35,6 +35,7 @@ async function req<T>(method: string, path: string, body?: unknown, timeoutMs = 
       headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
+      keepalive, // 앱을 닫아도 끝까지 전송 (기록 저장용)
     });
   } catch (e: any) {
     throw new ApiError(0, e?.name === 'TimeoutError' ? '서버 응답이 너무 늦어요. 다시 시도해 주세요' : '인터넷 연결을 확인해 주세요');
@@ -68,10 +69,10 @@ export const api = {
   pushTest: () => req<{ sent: number; removed: number; failed: string[] }>('POST', '/push/test', {}),
 
   stats: () => req<{ stats: Stats }>('GET', '/stats').then((r) => r.stats),
-  saveStats: (s: Partial<Stats>) => req<{ stats: Stats }>('PUT', '/stats', s).then((r) => r.stats),
+  saveStats: (s: Partial<Stats>) => req<{ stats: Stats }>('PUT', '/stats', s, 60_000, true).then((r) => r.stats),
 
   express: (ko: string) => req<Expression>('POST', '/ai/express', { ko }, 90_000),
   word: (word: string, sentence: string) => req<{ word: Word }>('POST', '/ai/word', { word, sentence }, 60_000).then((r) => r.word),
-  transcribe: (audio: string, mime: string) => req<{ text: string }>('POST', '/ai/transcribe', { audio, mime }, 90_000).then((r) => r.text),
+  transcribe: (audio: string, mime: string, lang: 'ko' | 'en' = 'ko') => req<{ text: string }>('POST', '/ai/transcribe', { audio, mime, lang }, 90_000).then((r) => r.text),
   tts: (text: string) => req<{ url: string; cached: boolean }>('POST', '/tts', { text }, 90_000).then((r) => r.url),
 };

@@ -6,7 +6,8 @@ import { unlockAudio, playTimes, stopAudio, prefetchVoice, getRate, setRate } fr
 import { pushState, enablePush, disablePush } from './push';
 import { recordingSupported, startRecording, stopAndTranscribe, cancelRecording } from './recorder';
 import { MASTERED_STAGE } from '../supabase/functions/api/srs';
-import { XP, levelOf, regionOf, tierOf, ALL_TIERS, QUESTS, emptyDay, type Day } from './game';
+import { XP, levelOf, regionOf, tierOf, ALL_TIERS, QUESTS, REGIONS, BADGES, emptyDay, emptyTotals, needFor, type Day, type Totals, type Ctx } from './game';
+import { compare, hintOf, type SpeakResult } from './speak';
 import { heroImg, castImg, faceImg, faceUrl, monsterImg, sceneBg, preloadArt, type Face } from './art';
 
 const app = document.getElementById('app')!;
@@ -16,12 +17,15 @@ const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '
 let me: User | null = null;
 let cards: Card[] = [];
 let stats: Stats | null = null;
-type Screen = 'loading' | 'setup' | 'login' | 'home' | 'create' | 'review' | 'list' | 'detail' | 'settings';
+type Screen = 'loading' | 'setup' | 'login' | 'home' | 'create' | 'review' | 'list' | 'detail' | 'settings' | 'hero';
 let screen: Screen = 'loading';
 let busy = '';
 
 const create = { ko: '', result: null as Expression | null, heard: 0, saved: null as Card | null, playing: false, recording: false };
-const review = { queue: [] as Card[], i: 0, revealed: false, heard: 0, target: 0, playing: false, done: 0, combo: 0, xp: 0, hit: false };
+const review = { queue: [] as Card[], i: 0, revealed: false, heard: 0, target: 0, playing: false, done: 0, combo: 0, xp: 0, hit: false, hint: false };
+// 말하기 채점 (모험·도감·주문 배우기 공용)
+const speakSt = { key: '', recording: false, result: null as SpeakResult | null };
+const speakRewarded = new Set<string>(); // 같은 주문으로 보상은 하루 한 번
 let detailId = '';
 let tierFilter = '';
 let repeat = 20;
@@ -63,11 +67,17 @@ const level = () => levelOf(stats?.xp ?? 0);
 
 // ───────── 경험치·퀘스트
 /** 경험치를 주고, 레벨이 오르면 축하 창을 띄움. 오늘 기록(day)도 함께 저장 */
-function gain(xp: number, change: (d: Day) => void = () => {}) {
+function totals(): Totals { return { ...emptyTotals(), ...(stats?.totals ?? {}) }; }
+function ctx(t = totals()): Ctx {
+  return { cards: cards.length, mastered: cards.filter((c) => c.stage >= MASTERED_STAGE).length, gold: cards.filter((c) => c.stage >= 4).length, streak: stats?.streak ?? 0, combo: Math.max(stats?.best_combo ?? 0, review.combo), t };
+}
+function gain(xp: number, change: (d: Day) => void = () => {}, changeT: (t: Totals) => void = () => {}) {
   if (!stats) return;
   const before = level().lv;
   const d = today();
   change(d);
+  const tt = totals();
+  changeT(tt);
   // 하루 첫 공부: 연속일 갱신 + 연속 보너스
   const t = kstDay(), y = kstDay(now() - 86400_000);
   let streak = stats.streak;
@@ -76,8 +86,16 @@ function gain(xp: number, change: (d: Day) => void = () => {}) {
     streak = stats.last_study_day === t ? stats.streak : stats.last_study_day === y ? stats.streak + 1 : 1;
     xp += Math.min(streak * XP.streakPerDay, XP.streakMax);
   }
-  stats = { ...stats, xp: stats.xp + xp, streak, last_study_day: t, day: d, best_combo: Math.max(stats.best_combo, review.combo) };
-  api.saveStats({ xp: stats.xp, streak, last_study_day: t, day: d, best_combo: stats.best_combo }).catch(() => {});
+  stats = { ...stats, xp: stats.xp + xp, streak, last_study_day: t, day: d, totals: tt, best_combo: Math.max(stats.best_combo, review.combo) };
+  // 새로 달성한 업적: 보상 경험치 + 알림
+  const owned = new Set(stats.badges ?? []);
+  const fresh = BADGES.filter((b) => !owned.has(b.id) && b.done(ctx(tt)));
+  if (fresh.length) {
+    stats.badges = [...owned, ...fresh.map((b) => b.id)];
+    stats.xp += fresh.reduce((a, b) => a + b.xp, 0);
+    fresh.forEach((b, i) => setTimeout(() => toast(`🏆 업적 달성: ${b.icon} ${b.name} (+${b.xp} XP)`, 4000), 600 + i * 1500));
+  }
+  api.saveStats({ xp: stats.xp, streak, last_study_day: t, day: d, totals: tt, badges: stats.badges ?? [], best_combo: stats.best_combo }).catch(() => {});
   const after = level().lv;
   if (after > before) setTimeout(() => levelUp(before, after), 300);
 }
@@ -94,6 +112,30 @@ function levelUp(from: number, to: number) {
     <button class="btn gold" data-close>계속하기</button></div>`;
   pop.addEventListener('click', (e) => { if ((e.target as HTMLElement).closest('[data-close]')) pop.remove(); });
   document.body.appendChild(pop);
+}
+
+/** 받은 경험치가 위로 떠오르는 효과 */
+function floatXP(text: string) {
+  const f = document.createElement('div');
+  f.className = 'float-xp';
+  f.textContent = text;
+  document.body.appendChild(f);
+  setTimeout(() => f.remove(), 1300);
+}
+
+/** 퀘스트를 누르면 그 퀘스트를 할 수 있는 곳으로 */
+function goQuest(id: string) {
+  const q = QUESTS.find((x) => x.id === id);
+  if (!q) return;
+  if (q.go === 'create') return go('create');
+  if (q.go === 'review') return dueCards().length ? go('review') : (toast('지금은 나타난 몬스터가 없어요. 새 주문을 배워 두면 10분 뒤 나타나요'), go('create'));
+  // 말하기: 몬스터가 있으면 모험에서, 없으면 아직 약한 주문을 골라 연습
+  if (dueCards().length) return go('review');
+  const weak = [...cards].sort((a, b) => a.stage - b.stage || a.due - b.due)[0];
+  if (!weak) { toast('먼저 주문을 하나 배워 주세요'); return go('create'); }
+  detailId = weak.id;
+  toast('이 주문을 🎙️ 말해서 연습해 보세요');
+  go('detail');
 }
 
 function claimQuest(id: string) {
@@ -117,7 +159,7 @@ function render() {
   else if (screen === 'setup' || screen === 'login') html = authView();
   else {
     html = hud();
-    html += ({ home: homeView, create: createView, review: reviewView, list: listView, detail: detailView, settings: settingsView } as Record<string, () => string>)[screen]();
+    html += ({ home: homeView, create: createView, review: reviewView, list: listView, detail: detailView, settings: settingsView, hero: heroView } as Record<string, () => string>)[screen]();
     const due = dueCards().length;
     const tab = (s: string, icon: string, label: string, on: boolean, badge = 0) =>
       `<button data-go="${s}" class="${on ? 'on' : ''}"><span class="ti">${icon}</span>${label}${badge ? `<i class="badge">${badge}</i>` : ''}</button>`;
@@ -136,9 +178,11 @@ function hud() {
   const { lv, cur, need } = level();
   const r = regionOf(lv);
   return `<header class="hud">
-    <div class="avatar" style="background-image:url(${faceUrl('happy')})"><span class="lv">Lv.${lv}</span></div>
-    <div class="who"><b>${esc(me?.name)}</b><small>${r.title}</small>
-      <div class="xpbar"><i style="width:${Math.round((cur / need) * 100)}%"></i><span>${cur} / ${need} XP</span></div></div>
+    <button class="hud-me" data-go="hero" aria-label="모험가 정보">
+      <div class="avatar" style="background-image:url(${faceUrl('happy')})"><span class="lv">Lv.${lv}</span></div>
+      <div class="who"><b>${esc(me?.name)}</b><small>${r.title} ›</small>
+        <div class="xpbar"><i style="width:${Math.round((cur / need) * 100)}%"></i><span>${cur} / ${need} XP</span></div></div>
+    </button>
     <div class="streak" title="연속 공부">🔥<b>${stats?.streak ?? 0}</b></div>
     <button class="gear" data-go="settings" aria-label="설정">⚙️</button>
   </header>`;
@@ -177,26 +221,27 @@ function homeView() {
     : `<button class="btn gold big" data-go="create">✨ 새 주문 배우기</button>`;
   const quests = QUESTS.map((q) => {
     const p = Math.min(q.progress(d), q.goal), done = p >= q.goal, claimed = d.claimed.includes(q.id);
-    return `<li class="${claimed ? 'claimed' : ''}"><span>${esc(q.label)}</span><small>${p}/${q.goal}</small>
-      ${claimed ? '<em>완료</em>' : done ? `<button class="btn gold mini" data-claim="${q.id}">+${q.xp}</button>` : `<em class="muted">+${q.xp}</em>`}</li>`;
+    return `<li class="${claimed ? 'claimed' : ''}" data-quest="${q.id}"><span>${q.icon} ${esc(q.label)}</span><small>${p}/${q.goal}</small>
+      ${claimed ? '<em>✔ 완료</em>' : done ? `<button class="btn gold mini" data-claim="${q.id}">보상 +${q.xp}</button>` : `<em class="go">+${q.xp} ›</em>`}</li>`;
   }).join('');
   const mastered = cards.filter((c) => c.stage >= MASTERED_STAGE).length;
   return `<main>
     <section class="stage">
       ${sceneBg(r)}
-      <div class="region">📍 ${r.name}</div>
+      <button class="region" data-go="hero">📍 ${r.name} ›</button>
       <div class="stage-hero">${heroImg()}</div>
     </section>
-    <section class="dialog-box with-face">${faceImg(face, 'dlg-face')}<b class="speaker">${esc(me?.name)}</b><p>${line}</p></section>
+    <section class="dialog-box with-face" data-act="cta">${faceImg(face, 'dlg-face')}<b class="speaker">${esc(me?.name)}</b><p>${line}</p></section>
     ${cta}
     <section class="panel">
       <div class="ribbon">오늘의 퀘스트</div>
       <ul class="quests">${quests}</ul>
+      <p class="hint center">퀘스트를 누르면 바로 해당 장소로 이동해요</p>
     </section>
     <section class="row3">
-      <div class="panel mini-stat"><b>${cards.length}</b><span>배운 주문</span></div>
-      <div class="panel mini-stat"><b>${mastered}</b><span>👑 마스터</span></div>
-      <div class="panel mini-stat"><b>${stats?.best_combo ?? 0}</b><span>최고 콤보</span></div>
+      <button class="panel mini-stat" data-act="dex-all"><b>${cards.length}</b><span>📖 배운 주문 ›</span></button>
+      <button class="panel mini-stat" data-act="dex-master"><b>${mastered}</b><span>👑 마스터 ›</span></button>
+      <button class="panel mini-stat" data-go="hero"><b>${(stats?.badges ?? []).length}/${BADGES.length}</b><span>🏆 업적 ›</span></button>
     </section>
   </main>`;
 }
@@ -238,7 +283,9 @@ function createView() {
       ${r.note_ko ? `<p class="note">💡 ${esc(r.note_ko)}</p>` : ''}
       ${wordList(r.words)}
       ${create.saved
-        ? `<p class="ok">✅ 주문을 배웠어요! 10분 뒤 첫 몬스터로 나타나요.</p><button class="btn wood" data-act="c-new">다른 주문 배우기</button>`
+        ? `<p class="ok">✅ 주문을 배웠어요! 10분 뒤 첫 몬스터로 나타나요.</p>
+           ${speakPanel(`c:${create.saved.id}`, '🎙️ 따라 말해 보기')}
+           <div class="btns"><button class="btn wood" data-act="c-new">✨ 다른 주문 배우기</button>${dueCards().length ? `<button class="btn wood" data-go="review">⚔️ 모험 (${dueCards().length})</button>` : `<button class="btn wood" data-go="home">🏠 마을로</button>`}</div>`
         : `<button class="btn gold big" data-act="save">📖 도감에 저장 <small>+${XP.create} XP</small></button><button class="btn wood" data-act="generate">🔄 마음에 안 들면 다시 만들기</button>`}
     </section>`;
   }
@@ -256,7 +303,10 @@ function reviewView() {
       <div class="pop-hero">${faceImg(review.done ? 'happy' : 'wow', 'pop-face')}</div>
       ${review.done ? `<p class="lvbig">몬스터 <b>${review.done}</b>마리 처치 · <b>+${review.xp}</b> XP</p>` : `<p>지금은 나타난 몬스터가 없어요</p>`}
       <p class="muted">${next ? `다음 몬스터: ${when(next.due)}` : ''}</p>
-      <button class="btn gold" data-go="home">마을로 돌아가기</button>
+      <div class="btns col">
+        <button class="btn gold" data-go="create">✨ 새 주문 배우기</button>
+        <div class="btns"><button class="btn wood" data-go="list">📖 도감</button><button class="btn wood" data-go="home">🏠 마을로</button></div>
+      </div>
     </section></main>`;
   }
   const left = review.queue.length - review.i;
@@ -265,16 +315,24 @@ function reviewView() {
     <section class="battle">
       ${sceneBg(r)}
       <div class="bt-top"><span>남은 몬스터 ${left}</span>${review.combo > 1 ? `<span class="combo">${review.combo} COMBO!</span>` : ''}<span style="color:${tier.color}">${tier.icon} ${tier.name}</span></div>
-      <div class="bt-monster">${monsterImg(c.stage, review.hit)}</div>
+      <div class="bt-monster"><div class="hp"><i style="width:${review.hit ? 0 : 100}%"></i></div>${monsterImg(c.stage, review.hit)}</div>
       <div class="bt-hero">${review.revealed ? castImg('casting') : heroImg()}</div>
     </section>
     <section class="panel">
       <p class="sub">이 말을 영어로 외쳐 보세요!</p>
       <p class="ko">${esc(c.ko)}</p>`;
   if (!review.revealed) {
-    html += `<button class="btn gold big" data-act="reveal">🔮 정답 주문 보기</button>`;
+    html += `${review.hint ? `<p class="hint-line">💡 ${esc(hintOf(c.en))}</p>` : ''}
+      ${speakPanel(`r:${c.id}`, '🎙️ 말해서 공격하기')}
+      <div class="btns">
+        ${review.hint ? '' : `<button class="btn wood" data-act="hint">💡 힌트 <small>(경험치 절반)</small></button>`}
+        <button class="btn wood" data-act="reveal">🔮 정답 보기</button>
+      </div>
+      <p class="hint center">떠올린 영어를 소리 내어 말하면 정확도로 공격해요</p>`;
   } else {
+    const sug = speakSt.key === `r:${c.id}` && speakSt.result ? (speakSt.result.score >= 80 ? 'good' : speakSt.result.score >= 50 ? 'hard' : 'again') : '';
     html += `<p class="en">${tappable(c.en)}</p>
+      ${speakSt.key === `r:${c.id}` && speakSt.result ? speakPanel(`r:${c.id}`) : ''}
       ${rateButtons()}
       <div class="btns">
         <button class="btn wood" data-act="r-play">${review.playing ? '⏹ 멈추기' : `🔁 ${REVIEW_AUTO}번 더`}</button>
@@ -284,12 +342,70 @@ function reviewView() {
       ${c.note ? `<p class="note">💡 ${esc(c.note)}</p>` : ''}
       <p class="sub center">얼마나 기억났나요?</p>
       <div class="grades">
-        <button data-grade="again" class="g g-again">💨 몰랐음<small>10분 뒤 다시</small></button>
-        <button data-grade="hard" class="g g-hard">⚔️ 헷갈림<small>공격</small></button>
-        <button data-grade="good" class="g g-good">💥 알았음<small>치명타!</small></button>
+        <button data-grade="again" class="g g-again ${sug === 'again' ? 'suggest' : ''}">💨 몰랐음<small>10분 뒤 다시</small></button>
+        <button data-grade="hard" class="g g-hard ${sug === 'hard' ? 'suggest' : ''}">⚔️ 헷갈림<small>공격</small></button>
+        <button data-grade="good" class="g g-good ${sug === 'good' ? 'suggest' : ''}">💥 알았음<small>치명타!</small></button>
       </div>`;
   }
   return html + `</section></main>`;
+}
+
+/** 🎙️ 말하기 버튼과 채점 결과 */
+function speakPanel(key: string, label = '🎙️ 영어로 말해 보기') {
+  const mine = speakSt.key === key;
+  const rec = mine && speakSt.recording;
+  const r = mine ? speakSt.result : null;
+  const verdict = r ? (r.score >= 95 ? '🎯 완벽해요!' : r.score >= 80 ? '💥 명중!' : r.score >= 50 ? '⚔️ 거의 다 왔어요' : '💨 빗나갔어요') : '';
+  return `<div class="speak">
+    <button class="btn ${rec ? 'danger rec-pulse' : 'gold'}" data-speak="${key}">${rec ? '⏹ 다 말했어요 (누르면 채점)' : r ? '🎙️ 다시 말해 보기' : label}</button>
+    ${r ? `<div class="speak-res"><b class="score s${r.score >= 80 ? 'ok' : r.score >= 50 ? 'mid' : 'bad'}">${r.score}점</b> <span>${verdict}</span>
+      <p class="marks">${r.marks.map((m) => `<span class="${m.ok ? 'hitw' : 'miss'}">${esc(m.w)}</span>`).join(' ')}</p>
+      <small class="muted">들린 말: "${esc(r.heard)}"</small></div>` : ''}
+  </div>`;
+}
+
+function heroView() {
+  const { lv, cur, need } = level();
+  const r = regionOf(lv);
+  const t = totals();
+  const c = ctx(t);
+  const owned = new Set(stats?.badges ?? []);
+  const tierCount = ALL_TIERS.map((x) => ({ ...x, n: cards.filter((cd) => tierOf(cd.stage).key === x.key).length }));
+  // 다음 레벨·다음 지역까지
+  let toNext = 0; for (let l = lv; l < (REGIONS.find((g) => g.from > lv)?.from ?? lv); l++) toNext += needFor(l);
+  toNext -= cur;
+  const nextRegion = REGIONS.find((g) => g.from > lv);
+  return `<main>
+    <section class="stage hero-stage">${sceneBg(r)}<div class="stage-hero">${heroImg()}</div>
+      <div class="hero-card"><b>Lv.${lv}</b><span>${esc(me?.name)}</span><small>${r.title}</small></div></section>
+    <section class="panel">
+      <div class="ribbon">모험가 정보</div>
+      <div class="xpbar big"><i style="width:${Math.round((cur / need) * 100)}%"></i><span>다음 레벨까지 ${need - cur} XP</span></div>
+      <div class="stat-grid">
+        <div><b>${stats?.xp ?? 0}</b><span>누적 XP</span></div><div><b>🔥 ${stats?.streak ?? 0}일</b><span>연속 공부</span></div>
+        <div><b>${cards.length}</b><span>배운 주문</span></div><div><b>${t.spoken}</b><span>말해서 공격</span></div>
+        <div><b>${t.reviewed}</b><span>몬스터 처치</span></div><div><b>⚡ ${stats?.best_combo ?? 0}</b><span>최고 콤보</span></div>
+      </div>
+      <div class="tier-row">${tierCount.map((x) => `<button class="chip" data-act="dex-tier" data-t="${x.key}">${x.icon} ${x.n}</button>`).join('')}</div>
+    </section>
+    <section class="panel">
+      <div class="ribbon">모험 지도</div>
+      <ol class="map">${REGIONS.map((g) => {
+        const open = lv >= g.from, here = g === r;
+        return `<li class="${open ? 'open' : 'locked'} ${here ? 'here' : ''}" style="background-image:url(./art/bg-${g.feature}.webp)">
+          <span>${open ? '' : '🔒 '}${g.name}</span><small>Lv.${g.from}~ · ${g.title}${here ? ' · 지금 여기' : ''}</small></li>`;
+      }).join('')}</ol>
+      ${nextRegion ? `<p class="hint center">다음 지역 <b>${nextRegion.name}</b>까지 약 ${toNext} XP</p>` : `<p class="hint center">모든 지역을 열었어요!</p>`}
+    </section>
+    <section class="panel">
+      <div class="ribbon">업적 ${owned.size}/${BADGES.length}</div>
+      <div class="badges">${BADGES.map((b) => {
+        const has = owned.has(b.id); const now = Math.min(b.now(c), b.goal);
+        return `<div class="badge-item ${has ? 'got' : ''}"><span class="bi">${has ? b.icon : '🔒'}</span><b>${b.name}</b><small>${b.desc}</small>
+          ${has ? `<em>+${b.xp} XP 받음</em>` : `<div class="mini-bar"><i style="width:${Math.round((now / b.goal) * 100)}%"></i></div><small>${now}/${b.goal}</small>`}</div>`;
+      }).join('')}</div>
+    </section>
+  </main>`;
 }
 
 function listView() {
@@ -317,7 +433,9 @@ function detailView() {
       <p class="ko">${esc(c.ko)}</p>
       <p class="en">${tappable(c.en)}</p>
       ${rateButtons()}
-      <div class="btns"><button class="btn gold" data-act="d-play">🔊 듣기</button><button class="btn wood" data-go="list">← 도감</button></div>
+      <div class="btns"><button class="btn wood" data-act="d-play">🔊 한 번</button><button class="btn wood" data-act="d-loop">🔁 ${repeat}번</button></div>
+      ${speakPanel(`d:${c.id}`)}
+      <button class="btn wood" data-go="list">← 도감으로</button>
       ${c.alts.length ? `<div class="alts"><div class="sub">다른 표현</div>${c.alts.map((a) => `<p>${tappable(a)}</p>`).join('')}</div>` : ''}
       ${c.note ? `<p class="note">💡 ${esc(c.note)}</p>` : ''}
       ${wordList(c.words)}
@@ -401,7 +519,9 @@ async function start() {
 function go(s: Screen) {
   stopAudio();
   if (create.recording) { cancelRecording(); create.recording = false; }
-  if (s === 'review' && screen !== 'review') { review.queue = dueCards(); review.i = 0; review.revealed = false; review.done = 0; review.heard = 0; review.combo = 0; review.xp = 0; }
+  if (s === 'review' && screen !== 'review') { review.queue = dueCards(); review.i = 0; review.revealed = false; review.done = 0; review.heard = 0; review.combo = 0; review.xp = 0; review.hint = false; }
+  if (speakSt.recording) cancelRecording();
+  speakSt.key = ''; speakSt.recording = false; speakSt.result = null;
   screen = s;
   render();
   window.scrollTo(0, 0);
@@ -449,7 +569,7 @@ async function save() {
   if (!card) return;
   cards.push(card);
   create.saved = card;
-  gain(XP.create, (d) => { d.created++; });
+  gain(XP.create, (d) => { d.created++; }, (t) => { t.created++; });
   render();
 }
 
@@ -479,18 +599,54 @@ async function grade(g: Grade) {
   if (!r) return;
   cards = cards.map((x) => (x.id === r.id ? r : x));
   review.combo = g === 'good' ? review.combo + 1 : 0;
-  const xp = (g === 'good' ? XP.good : g === 'hard' ? XP.hard : XP.again) + (g === 'good' ? Math.min(Math.max(0, review.combo - 1) * XP.comboBonus, 10) : 0);
+  let xp = (g === 'good' ? XP.good : g === 'hard' ? XP.hard : XP.again) + (g === 'good' ? Math.min(Math.max(0, review.combo - 1) * XP.comboBonus, 10) : 0);
+  if (review.hint) xp = Math.ceil(xp / 2);
+  floatXP(g === 'again' ? `💨 +${xp} XP` : `${g === 'good' ? '💥' : '⚔️'} +${xp} XP`);
   review.xp += xp;
   review.done++;
   // 맞히면 몬스터가 쓰러지는 모습을 잠깐 보여 줌
   if (g !== 'again') { review.hit = true; render(); await new Promise((res) => setTimeout(res, 450)); review.hit = false; }
-  review.i++; review.revealed = false; review.heard = 0;
+  review.i++; review.revealed = false; review.heard = 0; review.hint = false;
+  speakSt.key = ''; speakSt.result = null;
   const finished = review.i >= review.queue.length && dueCards().length === 0;
-  gain(xp, (d) => { d.reviewed++; if (finished) d.allDone = true; });
+  gain(xp, (d) => { d.reviewed++; if (finished) d.allDone = true; }, (t) => { t.reviewed++; });
   render();
   window.scrollTo(0, 0);
   const next = review.queue[review.i];
   if (next) prefetchVoice(next.en);
+}
+
+/** 🎙️ 말하기: 누르면 녹음 시작, 다시 누르면 채점 */
+async function toggleSpeak(key: string) {
+  const [kind, id] = key.split(':');
+  const card = kind === 'c' ? create.saved : cards.find((x) => x.id === id) ?? review.queue[review.i];
+  const target = card?.en ?? '';
+  if (!target) return;
+  if (!(speakSt.recording && speakSt.key === key)) {
+    if (speakSt.recording) cancelRecording();
+    stopAudio();
+    try {
+      await startRecording(30_000, () => toggleSpeak(key));
+      speakSt.key = key; speakSt.recording = true; speakSt.result = null; render();
+    } catch (e) { toast(errMsg(e)); }
+    return;
+  }
+  speakSt.recording = false;
+  const heard = await run('말한 영어를 듣고 채점하는 중…', () => stopAndTranscribe('en'));
+  if (heard === undefined) { render(); return; }
+  const res = compare(target, heard);
+  speakSt.result = res;
+  // 보상: 80점 이상, 같은 주문은 하루 한 번
+  const rk = `${kstDay()}:${card!.id}`;
+  if (res.score >= 80 && !speakRewarded.has(rk)) {
+    speakRewarded.add(rk);
+    const bonus = XP.speak + (res.score >= 95 ? XP.perfect : 0);
+    floatXP(`🎙️ +${bonus} XP`);
+    gain(bonus, (d) => { d.spoken = (d.spoken ?? 0) + 1; }, (t) => { t.spoken++; if (res.score >= 95) t.perfect++; });
+  }
+  // 모험 중이면 말한 뒤 정답을 공개하고, 점수에 맞는 채점 버튼을 추천
+  if (kind === 'r' && !review.revealed) { review.revealed = true; review.heard = 0; render(); reviewPlay(); return; }
+  render();
 }
 
 async function toggleRecord() {
@@ -528,12 +684,14 @@ app.addEventListener('input', (e) => {
 });
 
 app.addEventListener('click', async (e) => {
-  const el = (e.target as HTMLElement).closest('button, .w') as HTMLElement | null;
+  const el = (e.target as HTMLElement).closest('button, .w, [data-quest], [data-act]') as HTMLElement | null;
   if (!el) return;
   const d = el.dataset;
   if (d.go) return go(d.go as Screen);
   if (d.rate) { setRate(Number(d.rate)); render(); return; }
   if (d.claim) return claimQuest(d.claim);
+  if (d.quest) return goQuest(d.quest);
+  if (d.speak) return toggleSpeak(d.speak);
   if (d.tier !== undefined) { tierFilter = d.tier; return render(); }
   if (d.word) {
     const sentence = el.closest('p')?.textContent ?? '';
@@ -575,6 +733,25 @@ app.addEventListener('click', async (e) => {
     case 'c-new': create.ko = ''; create.result = null; create.saved = null; create.heard = 0; return render();
     case 'save': return save();
     case 'reveal': return reveal();
+    case 'hint': review.hint = true; return render();
+    case 'cta': return dueCards().length ? go('review') : go('create');
+    case 'dex-all': tierFilter = ''; return go('list');
+    case 'dex-master': tierFilter = 'master'; return go('list');
+    case 'dex-tier': tierFilter = d.t ?? ''; return go('list');
+    case 'd-loop': {
+      const c = cards.find((x) => x.id === detailId);
+      if (!c) return;
+      el.textContent = '재생 중… (다시 누르면 멈춤)';
+      el.dataset.act = 'd-stop';
+      const heard = await playTimes(c.en, repeat).catch((err) => { toast(errMsg(err)); return 0; });
+      if (heard) {
+        const updated = await api.listen(c.id, heard).catch(() => null);
+        if (updated) cards = cards.map((x) => (x.id === updated.id ? updated : x));
+        if (heard >= repeat) { gain(XP.loop, (dd) => { dd.loops++; }); floatXP(`🔁 +${XP.loop} XP`); }
+      }
+      return render();
+    }
+    case 'd-stop': stopAudio(); return;
     case 'd-play': {
       const c = cards.find((x) => x.id === detailId);
       if (c) playTimes(c.en, 1).catch((err) => toast(errMsg(err)));
