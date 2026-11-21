@@ -69,6 +69,7 @@ function pushSection(): HTMLElement {
     try {
       const r = await enablePush();
       if (r === 'ok') st.ok('알림을 켰어요');
+      else if (r === 'denied') st.fail(new Error('알림 권한이 허용되지 않았어요. 기기 설정에서 알림을 허용해 주세요'));
       else if (r === 'need-home-screen') st.fail(new Error('홈 화면에 추가 후 열어주세요'));
       else st.fail(new Error('이 브라우저는 알림을 지원하지 않아요'));
     } catch (e) { st.fail(e); }
@@ -95,6 +96,7 @@ function maskSection(cfg: Config, initial: Term[]): HTMLElement {
     const terms = [...rows.querySelectorAll('.mask-row')]
       .map((r) => { const i = r.querySelectorAll('input'); return { term: i[0].value.trim(), alias: i[1].value.trim() }; })
       .filter((t) => t.term || t.alias);
+    if (terms.some((t) => !t.term || !t.alias)) return st.fail(new Error('가릴 말과 바꿀 말을 모두 입력해 주세요'));
     try {
       await api('/mask-terms', { method: 'PUT', body: JSON.stringify({ terms }) });
       await patch({ mask_enabled: sw.checked });

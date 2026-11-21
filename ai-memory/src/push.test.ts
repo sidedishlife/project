@@ -62,10 +62,27 @@ describe('enablePush', () => {
       userAgent: ANDROID,
       serviceWorker: { register, ready: Promise.resolve({ pushManager: { subscribe } }) },
     });
-    const r = await enablePush({ nav: n, standalone: false, call: call as never });
+    const order: string[] = [];
+    register.mockImplementation(async () => { order.push('register'); return {}; });
+    const requestPermission = vi.fn(async () => { order.push('perm'); return 'granted' as NotificationPermission; });
+    const r = await enablePush({ nav: n, standalone: false, call: call as never, requestPermission });
     expect(r).toBe('ok');
+    expect(order).toEqual(['perm', 'register']);
     expect(subscribe).toHaveBeenCalledWith({ userVisibleOnly: true, applicationServerKey: new Uint8Array([1, 2, 3]) });
     expect(call).toHaveBeenCalledWith('/push/subscribe', { method: 'POST', body: JSON.stringify({ endpoint: 'https://x', keys: { p256dh: 'a', auth: 'b' } }) });
+    vi.unstubAllGlobals();
+  });
+  it('권한 요청이 거절되면 등록·구독·서버 전송을 하지 않는다', async () => {
+    vi.stubGlobal('PushManager', class {});
+    const register = vi.fn();
+    const call = vi.fn();
+    const r = await enablePush({
+      nav: nav({ userAgent: ANDROID, serviceWorker: { register } }), standalone: false, call: call as never,
+      requestPermission: async () => 'denied',
+    });
+    expect(r).toBe('denied');
+    expect(register).not.toHaveBeenCalled();
+    expect(call).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
 });

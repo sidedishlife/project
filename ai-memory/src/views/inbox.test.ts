@@ -73,6 +73,7 @@ describe('받은함', () => {
     await click(btn(root, '후보 만들기'));
     expect(apiMock).toHaveBeenCalledWith('/paste', { method: 'POST', body: JSON.stringify({ text: '대화 내용' }) });
     expect(apiMock.mock.calls.filter((c) => c[0] === '/inbox').length).toBe(2);
+    expect(root.textContent).toContain('후보 2개를 받았어요');
   });
   it('후보가 없으면 안내 문구', async () => {
     apiMock.mockImplementation(async (p: string) => (p === '/inbox' ? { candidates: [] } : p === '/fields' ? { fields: [] } : { notes: [] }));

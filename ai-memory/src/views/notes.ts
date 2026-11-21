@@ -22,18 +22,21 @@ export async function renderNotes(root: HTMLElement): Promise<void> {
   const list = h('div', { class: 'note-list' });
   const detail = h('div', { class: 'note-detail' });
 
+  let seq = 0;
   const load = async () => {
+    const mine = ++seq;
     const params = new URLSearchParams();
     if (q.value.trim()) params.set('q', q.value.trim());
     if (field.value) params.set('field', field.value);
     const qs = params.toString();
     try {
       const { notes } = await api<{ notes: Summary[] }>('/notes' + (qs ? `?${qs}` : ''));
+      if (mine !== seq) return; // 더 새로운 검색이 있으면 옛 응답은 버린다
       list.replaceChildren(...(notes.length
         ? notes.map((n) => h('button', { class: 'note-item', onclick: () => void open(n.id) },
             h('span', { class: 'note-title' }, n.title), h('span', { class: 'hint' }, fieldName.get(n.field_id ?? '') ?? '미분류')))
         : [h('p', { class: 'empty' }, '노트가 없어요')]));
-    } catch (e) { list.replaceChildren(h('p', { class: 'error' }, errText(e))); }
+    } catch (e) { if (mine === seq) list.replaceChildren(h('p', { class: 'error' }, errText(e))); }
   };
 
   const open = async (id: string) => {
@@ -41,14 +44,13 @@ export async function renderNotes(root: HTMLElement): Promise<void> {
       const d = await api<Detail>(`/notes/${encodeURIComponent(id)}`);
       const body = h('div', { class: 'note' });
       body.innerHTML = renderMarkdown(d.concept.note_md); // 이스케이프 후 변환
-      const back = h('button', { onclick: () => { detail.replaceChildren(); root.classList.remove('reading'); } }, '← 목록');
+      const back = h('button', { onclick: () => { detail.replaceChildren(); } }, '← 목록');
       detail.replaceChildren(h('div', { class: 'note-body' },
         back, h('h2', {}, d.concept.title), h('p', { class: 'hint' }, `수정 ${fmt(d.concept.updated_at)}`), body,
         d.questions.length ? h('details', {}, h('summary', {}, `질문 ${d.questions.length}개`), h('ul', {}, ...d.questions.map((x) => h('li', {}, `[${KIND[x.kind] ?? x.kind}] ${x.prompt}`)))) : null,
         h('details', {}, h('summary', {}, `버전 기록 ${d.versions.length}개`),
           d.versions.length ? h('ul', {}, ...d.versions.map((v) => h('li', {}, `${fmt(v.created_at)} 이전 버전`))) : h('p', { class: 'hint' }, '합치기 전 기록이 없어요')),
       ));
-      root.classList.add('reading');
       detail.scrollIntoView?.();
     } catch (e) { detail.replaceChildren(h('p', { class: 'error' }, errText(e))); }
   };

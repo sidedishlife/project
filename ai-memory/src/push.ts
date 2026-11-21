@@ -2,6 +2,7 @@
 import { api } from './api';
 
 export type PushSupport = 'ok' | 'need-home-screen' | 'unsupported';
+export type PushResult = PushSupport | 'denied';
 
 function isIos(nav: Navigator): boolean {
   if (/iPhone|iPad|iPod/.test(nav.userAgent)) return true;
@@ -31,12 +32,15 @@ type Call = <T>(path: string, init?: RequestInit) => Promise<T>;
 
 /** 홈 화면 추가 전(iOS)이거나 미지원이면 구독을 시도하지 않고 그 상태를 돌려준다 */
 export async function enablePush(
-  o: { nav?: Navigator; standalone?: boolean; call?: Call } = {},
-): Promise<PushSupport> {
+  o: { nav?: Navigator; standalone?: boolean; call?: Call; requestPermission?: () => Promise<NotificationPermission> } = {},
+): Promise<PushResult> {
   const nav = o.nav ?? navigator;
   const call = o.call ?? api;
   const status = canEnablePush(nav, o.standalone ?? isStandalone());
   if (status !== 'ok') return status;
+  // iOS 는 사용자 터치 직후에만 권한 요청을 허용하므로, 어떤 await 보다 먼저 동기적으로 시작한다
+  const perm = await (o.requestPermission ?? (() => Notification.requestPermission()))();
+  if (perm !== 'granted') return 'denied';
   await nav.serviceWorker.register('./sw.js');
   const reg = await nav.serviceWorker.ready;
   const { key } = await call<{ key: string }>('/push/key');
