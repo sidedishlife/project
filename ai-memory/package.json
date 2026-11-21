@@ -10,6 +10,7 @@
     "test:server": "deno test -A supabase/functions/api"
   },
   "devDependencies": {
+    "happy-dom": "^21.0.4",
     "typescript": "^7.0.2",
     "vite": "^8.3.8",
     "vitest": "^5.1.1"

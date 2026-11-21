@@ -56,3 +56,32 @@ input, select, textarea {
   border-radius: 10px; background: var(--badge); color: #fff; font-size: 12px; line-height: 20px; text-align: center;
 }
 .badge[hidden] { display: none; }
+
+/* 받은함·복습·노트·설정 */
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; margin: 0 0 14px; display: grid; gap: 12px; }
+.card h2, .card h3 { margin: 0; }
+.actions, .grades { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 10px; }
+.grades { grid-template-columns: repeat(3, 1fr); }
+.q-text { font-size: 22px; font-weight: 700; margin: 0; }
+.question p { margin: 0 0 6px; }
+.mode-toggle { width: 100%; margin-bottom: 12px; font-size: 14px; }
+.note { overflow-wrap: anywhere; }
+.note code { background: var(--bg); padding: 1px 5px; border-radius: 6px; }
+.note hr { border: none; border-top: 1px solid var(--line); }
+.preview { color: var(--muted); margin: 0; }
+.paste { margin-bottom: 14px; display: grid; gap: 10px; }
+.paste > summary { min-height: 48px; display: flex; align-items: center; font-weight: 600; cursor: pointer; }
+.paste[open] { display: grid; }
+textarea { resize: vertical; }
+.note-filters { display: grid; grid-template-columns: 1fr 140px; gap: 10px; margin-bottom: 12px; }
+.note-list { display: grid; gap: 8px; }
+.note-item { display: flex; justify-content: space-between; align-items: center; gap: 10px; text-align: left; }
+.note-title { font-weight: 600; }
+.note-detail:not(:empty) { margin-top: 16px; display: grid; gap: 10px; }
+.guide { padding-left: 20px; margin: 0; }
+.mask-rows { display: grid; gap: 8px; }
+.mask-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; }
+.mask-row button { padding: 0 12px; }
+label.switch { display: flex; align-items: center; gap: 10px; min-height: 48px; }
+label.switch input { width: 28px; min-height: 28px; }
+.note-body { display: grid; gap: 10px; }

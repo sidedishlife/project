@@ -1,8 +1,17 @@
 import './style.css';
 import { getToken } from './api';
 import { applyTheme } from './theme';
-import { mountShell, navigate } from './router';
+import { mountShell, navigate, registerView } from './router';
 import { renderLogin } from './views/login';
+import { renderReview } from './views/review';
+import { renderInbox } from './views/inbox';
+import { renderNotes } from './views/notes';
+import { renderSettings } from './views/settings';
+
+registerView('review', (root) => renderReview(root));
+registerView('inbox', renderInbox);
+registerView('notes', renderNotes);
+registerView('settings', renderSettings);
 
 const app = document.getElementById('app')!;
 applyTheme();
