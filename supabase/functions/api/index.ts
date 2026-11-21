@@ -1,7 +1,7 @@
 // Study 영어 앱 서버. 모든 데이터 접근은 이 함수를 거친다(관리자 권한, 바깥 직접 접근은 DB에서 막혀 있음).
 // 주소: https://<project>.supabase.co/functions/v1/api/<경로>
 import { createClient } from 'npm:@supabase/supabase-js@2';
-import { express, lookup, transcribe, speak, geminiKey, AiError, VOICE } from './gemini.ts';
+import { express, lookup, transcribe, speak, geminiKey, AiError, VOICE, listModels, probe, setModels } from './gemini.ts';
 import { schedule, firstDue, listensThisReview, FIRST_LISTENS, type Grade } from './srs.ts';
 
 const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
@@ -101,6 +101,16 @@ async function getOwnCard(userId: string, id: string) {
 }
 
 // ───────────── 경로 처리 ─────────────
+// 모델 순서 설정을 DB에서 읽음 (1분 캐시)
+let modelConfigAt = 0;
+async function loadModelConfig() {
+  if (Date.now() - modelConfigAt < 60_000) return;
+  modelConfigAt = Date.now();
+  const { data } = await db.from('app_config').select('key, value').in('key', ['text_models', 'tts_models']);
+  const get = (k: string) => { const v = data?.find((r) => r.key === k)?.value; try { return typeof v === 'string' ? JSON.parse(v) : v; } catch { return undefined; } };
+  setModels(get('text_models'), get('tts_models'));
+}
+
 async function route(req: Request): Promise<Response> {
   const url = new URL(req.url);
   // /functions/v1/api/xxx 또는 /api/xxx 모두 처리
@@ -172,6 +182,16 @@ async function route(req: Request): Promise<Response> {
   }
 
   // ── Gemini
+  if (m === 'GET' && path === '/ai/models') {
+    if (!user.is_admin) throw new HttpError(403, '관리자만 볼 수 있어요');
+    return json({ models: await listModels() });
+  }
+  if (m === 'POST' && path === '/ai/probe') {
+    if (!user.is_admin) throw new HttpError(403, '관리자만 쓸 수 있어요');
+    const b = await body();
+    return json(await probe(String(b.model), b.kind === 'tts' ? 'tts' : 'text'));
+  }
+  if (parts[0] === 'ai' || path === '/tts') await loadModelConfig();
   if (m === 'POST' && path === '/ai/express') {
     const ko = String((await body()).ko ?? '').trim();
     if (!ko) throw new HttpError(400, '한국어 문장을 입력해 주세요');
