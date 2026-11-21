@@ -4,3 +4,4 @@ dist-single
 
 artifact/
 dist-pages
+deno.lock
