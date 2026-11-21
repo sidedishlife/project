@@ -5,8 +5,6 @@ import { CORS, HttpError, json } from './http.ts';
 import { hashPassword, newSession, pbkdf2, requireUser, verifyPassword } from './auth.ts';
 import { validateConfigPatch } from './config.ts';
 
-const DEFAULT_AI_MODEL = 'claude-haiku-5-5';
-const DEFAULT_DAILY_GOAL = 5;
 
 function validName(v: unknown) {
   const s = String(v ?? '').trim();
@@ -28,10 +26,10 @@ const mcpUrl = (secret: unknown) =>
 async function publicConfig() {
   const c = await config(['ai_model', 'daily_goal', 'slots', 'mask_enabled', 'mcp_secret']);
   return {
-    ai_model: c.ai_model ?? DEFAULT_AI_MODEL,
-    daily_goal: c.daily_goal ?? DEFAULT_DAILY_GOAL,
-    slots: c.slots ?? null,
-    mask_enabled: c.mask_enabled ?? null,
+    ai_model: c.ai_model,
+    daily_goal: c.daily_goal,
+    slots: c.slots,
+    mask_enabled: c.mask_enabled,
     mcp_url: mcpUrl(c.mcp_secret),
   };
 }
@@ -41,7 +39,12 @@ export async function route(req: Request): Promise<Response> {
   // /functions/v1/api/xxx 또는 /api/xxx 모두 처리
   const path = url.pathname.replace(/^.*\/api(?=\/|$)/, '') || '/';
   const m = req.method;
-  const body = async () => (m === 'GET' || m === 'DELETE' ? {} : await req.json().catch(() => { throw new HttpError(400, '요청 형식이 올바르지 않아요'); }));
+  const body = async (): Promise<Record<string, any>> => { // deno-lint-ignore no-explicit-any
+    if (m === 'GET' || m === 'DELETE') return {};
+    const b = await req.json().catch(() => { throw new HttpError(400, '요청 형식이 올바르지 않아요'); });
+    if (!b || typeof b !== 'object' || Array.isArray(b)) throw new HttpError(400, '요청 형식이 올바르지 않아요');
+    return b;
+  };
 
   // 처음 사용자 만들기: 사용자가 0명일 때만
   if (m === 'POST' && path === '/setup') {
@@ -51,14 +54,16 @@ export async function route(req: Request): Promise<Response> {
     if (cErr) throw new HttpError(500, cErr.message);
     if ((count ?? 0) > 0) throw new HttpError(409, '이미 설정이 끝났어요. 로그인해 주세요');
     const { data, error } = await db.from('users').insert({ name, password_hash: await hashPassword(password) }).select('id, name').single();
-    if (error) throw new HttpError(500, error.message);
+    // 동시에 두 번 불려도 DB의 유니크 인덱스(users_single)가 한 명만 허용
+    if (error) throw new HttpError(error.code === '23505' ? 409 : 500, error.code === '23505' ? '이미 설정이 끝났어요. 로그인해 주세요' : error.message);
     return json({ token: await newSession(data.id), user: data });
   }
 
   if (m === 'POST' && path === '/login') {
     const b = await body();
     const name = validName(b.name);
-    const { data } = await db.from('users').select('id, name, password_hash').eq('name', name).maybeSingle();
+    const { data, error } = await db.from('users').select('id, name, password_hash').eq('name', name).maybeSingle();
+    if (error) throw new HttpError(500, error.message);
     // 이름이 없을 때도 같은 시간·같은 메시지 (이름 존재 여부를 알려주지 않음)
     const ok = data ? await verifyPassword(String(b.password ?? ''), data.password_hash) : (await pbkdf2('x', new Uint8Array(16), 100_000), false);
     if (!ok || !data) throw new HttpError(401, '이름 또는 비밀번호가 맞지 않아요');
@@ -101,12 +106,8 @@ export async function route(req: Request): Promise<Response> {
         seen.add(term);
         rows.push({ term, alias });
       }
-      const { error: dErr } = await db.from('mask_terms').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-      if (dErr) throw new HttpError(500, dErr.message);
-      if (rows.length) {
-        const { error } = await db.from('mask_terms').insert(rows);
-        if (error) throw new HttpError(500, error.message);
-      }
+      const { error } = await db.rpc('replace_mask_terms', { terms: rows }); // 삭제+삽입을 한 트랜잭션으로
+      if (error) throw new HttpError(500, error.message);
       return json({ terms: rows });
     }
   }

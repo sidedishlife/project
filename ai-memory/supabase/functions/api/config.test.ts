@@ -1,5 +1,5 @@
 import { assertEquals, assertThrows } from 'jsr:@std/assert@1';
-import { validateConfigPatch } from './config.ts';
+import { CONFIG_DEFAULTS, validateConfigPatch, withDefaults } from './config.ts';
 import { HttpError } from './http.ts';
 
 const bad = (body: unknown) => {
@@ -44,4 +44,19 @@ Deno.test('본문이 객체가 아니면 400', () => {
   bad(null);
   bad([]);
   bad('x');
+});
+
+Deno.test('withDefaults: 빈 행이면 기본값 (slots 07:30/18:30/23:00, mask_enabled false)', () => {
+  const d = withDefaults({});
+  assertEquals(d.ai_model, 'claude-haiku-5-5');
+  assertEquals(d.daily_goal, 5);
+  assertEquals(d.slots, { morning: '07:30', evening: '18:30', bedtime: '23:00' });
+  assertEquals(d.mask_enabled, false);
+});
+Deno.test('withDefaults: 저장된 값(false, 다른 목표)은 덮지 않고 다른 키는 보존', () => {
+  const d = withDefaults({ daily_goal: 10, mask_enabled: true, mcp_secret: 's' });
+  assertEquals(d.daily_goal, 10);
+  assertEquals(d.mask_enabled, true);
+  assertEquals(d.mcp_secret, 's');
+  assertEquals(d.ai_model, CONFIG_DEFAULTS.ai_model);
 });

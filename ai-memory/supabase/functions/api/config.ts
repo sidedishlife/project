@@ -1,6 +1,21 @@
 // 설정 변경 검증 (순수 함수 — DB 접근 없음)
 import { HttpError } from './http.ts';
 
+export const CONFIG_DEFAULTS = {
+  ai_model: 'claude-haiku-5-5',
+  daily_goal: 5,
+  slots: { morning: '07:30', evening: '18:30', bedtime: '23:00' },
+  mask_enabled: false,
+} as const;
+
+/** app_config 행(key→value)에 기본값을 채운다. 저장된 값이 있으면 그대로 쓴다. */
+// deno-lint-ignore no-explicit-any
+export function withDefaults(rows: Record<string, any>): Record<string, any> {
+  const out = { ...rows };
+  for (const [k, v] of Object.entries(CONFIG_DEFAULTS)) if (out[k] === undefined || out[k] === null) out[k] = structuredClone(v);
+  return out;
+}
+
 const SLOT_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const SLOT_KEYS = ['morning', 'evening', 'bedtime'] as const;
 
