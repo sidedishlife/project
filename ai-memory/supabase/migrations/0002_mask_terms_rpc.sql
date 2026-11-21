@@ -2,7 +2,7 @@
 create or replace function replace_mask_terms(terms jsonb) returns void
 language plpgsql as $$
 begin
-  delete from mask_terms;
+  delete from mask_terms where true; -- WHERE 없는 DELETE는 pg_safeupdate가 막음
   insert into mask_terms (term, alias)
     select t->>'term', t->>'alias' from jsonb_array_elements(terms) as t;
 end;
@@ -15,6 +15,9 @@ begin -- Supabase의 API 역할(anon, authenticated)이 있을 때만(일반 Pos
   end if;
   if exists (select 1 from pg_roles where rolname = 'authenticated') then
     revoke all on function replace_mask_terms(jsonb) from authenticated;
+  end if;
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    grant execute on function replace_mask_terms(jsonb) to service_role;
   end if;
 end $$;
 
